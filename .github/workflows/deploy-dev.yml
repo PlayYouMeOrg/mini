@@ -1,0 +1,38 @@
+name: Deploy Dev (Build + Hosting + RTDB Rules)
+
+on:
+  push:
+    branches: [Dev]  # must match your branch name exactly
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: stable
+          cache: true
+
+      - name: Flutter deps
+        run: flutter pub get
+
+      - name: Build Flutter web (dev)
+        run: flutter build web --release --dart-define=APP_ENV=dev
+
+      - name: Authenticate to Google Cloud (OIDC)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/492681742422/locations/global/workloadIdentityPools/youmedev/providers/youmedev
+          service_account: github-actions-deploy-dev@youmedev-feab4.iam.gserviceaccount.com
+
+      - name: Install Firebase CLI
+        run: npm i -g firebase-tools
+
+      - name: Deploy Hosting + RTDB Rules
+        run: firebase deploy --project youmedev-feab4 --only hosting:dev-youmemini,database
