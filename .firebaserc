@@ -1,0 +1,14 @@
+{
+  "projects": {
+    "default": "youmedev-feab4"
+  },
+  "targets": {
+    "youmedev-feab4": {
+      "hosting": {
+        "dev-youmemini": [
+          "dev-youmemini"
+        ]
+      }
+    }
+  }
+}
