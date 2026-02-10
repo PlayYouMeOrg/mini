@@ -1,12 +1,16 @@
-name: Deploy Dev (Build + Hosting + RTDB Rules)
+name: Deploy Dev (Flutter Web + Hosting + Functions)
 
 on:
   push:
-    branches: [Dev]  # must match your branch name exactly
+    branches: [Development]
 
 permissions:
   contents: read
   id-token: write
+
+concurrency:
+  group: dev-deploy-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   deploy:
@@ -14,25 +18,50 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: subosito/flutter-action@v2
+      # Node for firebase-tools + functions build (if needed)
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          flutter-version: stable
+          node-version: "20"
+          cache: "npm"
+
+      # Flutter for building web
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "stable"
           cache: true
 
-      - name: Flutter deps
+      - name: Flutter pub get
         run: flutter pub get
 
-      - name: Build Flutter web (dev)
-        run: flutter build web --release --dart-define=APP_ENV=dev
+      - name: Build Flutter Web
+        run: flutter build web --release
 
-      - name: Authenticate to Google Cloud (OIDC)
-        uses: google-github-actions/auth@v2
+      - id: auth
+        name: Authenticate to Google Cloud (OIDC)
+        uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: projects/492681742422/locations/global/workloadIdentityPools/youmedev/providers/youmedev
           service_account: github-actions-deploy-dev@youmedev-feab4.iam.gserviceaccount.com
+          create_credentials_file: true
+          export_environment_variables: true
 
-      - name: Install Firebase CLI
-        run: npm i -g firebase-tools
+      # If you have Cloud Functions in ./functions (Node)
+      - name: Install functions deps (if functions folder exists)
+        run: |
+          if [ -d functions ]; then npm ci --prefix functions; fi
 
-      - name: Deploy Hosting + RTDB Rules
-        run: firebase deploy --project youmedev-feab4 --only hosting:dev-youmemini,database
+      - name: Build functions (if TypeScript)
+        run: |
+          if [ -d functions ]; then npm run --prefix functions build --if-present; fi
+
+      - name: Deploy Hosting (dev-youmemini) + Functions
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
+          CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: ${{ steps.auth.outputs.credentials_file_path }}
+          GOOGLE_GHA_CREDS_PATH: ${{ steps.auth.outputs.credentials_file_path }}
+        run: |
+          npx -y firebase-tools@latest deploy \
+            --project youmedev-feab4 \
+            --only hosting:dev-youmemini,functions
