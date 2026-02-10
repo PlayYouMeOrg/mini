@@ -18,18 +18,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Node for firebase-tools + functions build (if needed)
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          
 
-      # Flutter for building web
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: "stable"
+          channel: "stable"
           cache: true
 
       - name: Flutter pub get
@@ -47,7 +44,6 @@ jobs:
           create_credentials_file: true
           export_environment_variables: true
 
-      # If you have Cloud Functions in ./functions (Node)
       - name: Install functions deps (if functions folder exists)
         run: |
           if [ -d functions ]; then npm ci --prefix functions; fi
