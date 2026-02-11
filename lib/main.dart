@@ -224,7 +224,8 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
     }
   }
 
-  bool _isSessionLive(String? status) => status?.trim().toLowerCase() == 'live';
+  bool _isSessionLive(String? status) =>
+      status?.trim().toLowerCase() == 'started';
 
   Future<void> _assignRoundPromptsIfNeeded(PlayerRecord partner) async {
     if (_sessionId == null || _player == null) return;
@@ -1112,7 +1113,7 @@ class RtdbService {
   Uri _uri(String path) => Uri.parse('$_databaseBaseUrl/$path.json');
 
   Future<SessionRecord> fetchSession(String sessionId) async {
-    final resp = await http.get(_uri('sessions/$sessionId'));
+    final resp = await http.get(_uri('session/$sessionId'));
     _throwIfNotOk(resp);
     final payload = jsonDecode(resp.body);
     if (payload is! Map<String, dynamic>) {
