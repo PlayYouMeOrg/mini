@@ -5,6 +5,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 const _databaseBaseUrl =
     'https://youmedev-feab4-default-rtdb.firebaseio.com';
@@ -48,6 +49,7 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
   final _service = RtdbService();
   final _firestoreService = FirestoreSignupService();
   final _promptCatalogService = PromptCatalogService();
+  final _sessionStore = SessionStateStore();
 
   Stage _stage = Stage.signup;
   String? _sessionId;
@@ -69,6 +71,43 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
     if (_sessionId != null && _sessionId!.trim().isEmpty) {
       _sessionId = null;
     }
+
+    unawaited(_restoreSavedSession());
+  }
+
+  Future<void> _restoreSavedSession() async {
+    final initialSessionId = _sessionId;
+
+    final savedState = await _sessionStore.load();
+    if (!mounted || savedState == null) return;
+
+    if (initialSessionId != null && initialSessionId != savedState.sessionId) {
+      await _sessionStore.clear();
+      return;
+    }
+
+    try {
+      final session = await _service.fetchSession(savedState.sessionId);
+      final player = await _service.fetchPlayer(
+        savedState.sessionId,
+        savedState.playerId,
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        _sessionId = savedState.sessionId;
+        _playerId = savedState.playerId;
+        _session = session;
+        _player = player;
+        _error = null;
+        _stage = _isSessionLive(session.status) ? Stage.game : Stage.waiting;
+      });
+
+      _startPolling();
+    } catch (_) {
+      await _sessionStore.clear();
+    }
   }
 
   void _joinWithCode(String code) {
@@ -85,6 +124,8 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
       _error = null;
       _stage = Stage.signup;
     });
+
+    unawaited(_sessionStore.clear());
   }
 
   @override
@@ -139,6 +180,11 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
         _pendingSignup = null;
         _stage = Stage.waiting;
       });
+
+      await _sessionStore.save(
+        sessionId: _sessionId!,
+        playerId: playerId,
+      );
 
       _startPolling();
     } catch (e) {
@@ -966,6 +1012,52 @@ class SignupPayload {
   final bool acceptedTermsAndGameTexts;
   final bool acceptedPromoTexts;
   final RoundPreference roundPreference;
+}
+
+
+class PersistedSessionState {
+  const PersistedSessionState({
+    required this.sessionId,
+    required this.playerId,
+  });
+
+  final String sessionId;
+  final String playerId;
+}
+
+class SessionStateStore {
+  static const _sessionIdKey = 'session_state.session_id';
+  static const _playerIdKey = 'session_state.player_id';
+
+  Future<void> save({
+    required String sessionId,
+    required String playerId,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_sessionIdKey, sessionId);
+    await prefs.setString(_playerIdKey, playerId);
+  }
+
+  Future<PersistedSessionState?> load() async {
+    final prefs = await SharedPreferences.getInstance();
+    final sessionId = prefs.getString(_sessionIdKey);
+    final playerId = prefs.getString(_playerIdKey);
+
+    if (sessionId == null || playerId == null) {
+      return null;
+    }
+
+    return PersistedSessionState(
+      sessionId: sessionId,
+      playerId: playerId,
+    );
+  }
+
+  Future<void> clear() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_sessionIdKey);
+    await prefs.remove(_playerIdKey);
+  }
 }
 
 class SessionRecord {
