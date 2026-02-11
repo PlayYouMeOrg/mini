@@ -30,7 +30,7 @@ class MiniApp extends StatelessWidget {
   }
 }
 
-enum Stage { signup, waiting, game }
+enum Stage { signup, waiting, game, ended }
 
 enum RoundPreference { openingUp, playful }
 
@@ -60,6 +60,7 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
   Timer? _poller;
   String? _initialSessionStatus;
   PromptCatalog? _promptCatalog;
+  List<PlayerRecord> _mutualSeeAgainPlayers = const <PlayerRecord>[];
 
   @override
   void initState() {
@@ -100,8 +101,12 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
         _session = session;
         _player = player;
         _error = null;
-        _stage = _isSessionLive(session.status) ? Stage.game : Stage.waiting;
+        _stage = _stageForStatus(session.status);
       });
+
+      if (_isSessionEnded(session.status)) {
+        await _loadMutualSeeAgainPlayers();
+      }
 
       _startPolling();
     } catch (_) {
@@ -196,24 +201,32 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
 
         final roundChanged =
             (_session?.round != null && session.round != _session!.round);
+        final previousPlayer = _player;
 
         if (roundChanged && _stage == Stage.game) {
+          final previousPartnerId = previousPlayer?.pairedWith;
           await _service.clearPairing(_sessionId!, _playerId!);
           player.pairedWith = null;
           player.pairedRound = null;
           player.partnerCode = null;
+
+          if (previousPartnerId != null) {
+            unawaited(_showRoundEndedDialog(previousPartnerId));
+          } else {
+            unawaited(_showRoundEndedDialog(null));
+          }
         }
 
+        final nextStage = _stageForStatus(session.status);
         setState(() {
           _session = session;
           _player = player;
           _error = null;
+          _stage = _stage == Stage.signup ? _stage : nextStage;
         });
 
-        if (_stage == Stage.waiting && _isSessionLive(session.status)) {
-          setState(() {
-            _stage = Stage.game;
-          });
+        if (_isSessionEnded(session.status)) {
+          await _loadMutualSeeAgainPlayers();
         }
       } catch (e) {
         if (!mounted) return;
@@ -262,6 +275,86 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
 
   bool _isSessionLive(String? status) =>
       status?.trim().toLowerCase() == 'started';
+
+  bool _isSessionEnded(String? status) =>
+      status?.trim().toLowerCase() == 'ended';
+
+  Stage _stageForStatus(String? status) {
+    if (_isSessionLive(status)) return Stage.game;
+    if (_isSessionEnded(status)) return Stage.ended;
+    return Stage.waiting;
+  }
+
+  Future<void> _showRoundEndedDialog(String? partnerId) async {
+    if (!mounted) return;
+
+    String? partnerName;
+    if (partnerId != null && _sessionId != null) {
+      try {
+        final partner = await _service.fetchPlayer(_sessionId!, partnerId);
+        partnerName = partner.name.trim().isEmpty ? null : partner.name.trim();
+      } catch (_) {
+        partnerName = null;
+      }
+    }
+
+    if (!mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('The round has ended'),
+          content: Text(
+            partnerName != null
+                ? 'Would you like to see $partnerName again?'
+                : 'Would you like to see your last partner again?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('No thanks'),
+            ),
+            FilledButton.icon(
+              onPressed: () async {
+                if (_sessionId != null && _playerId != null && partnerId != null) {
+                  await _service.setSeeAgainPreference(
+                    sessionId: _sessionId!,
+                    playerId: _playerId!,
+                    partnerId: partnerId,
+                  );
+                }
+                if (context.mounted) {
+                  Navigator.of(context).pop();
+                }
+              },
+              icon: const Text('👍'),
+              label: const Text('Yes'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _loadMutualSeeAgainPlayers() async {
+    if (_sessionId == null || _playerId == null) return;
+    final players = await _service.fetchPlayers(_sessionId!);
+    final me = players[_playerId!];
+    if (me == null) return;
+
+    final matches = me.seeAgainPlayerIds
+        .map((partnerId) => players[partnerId])
+        .whereType<PlayerRecord>()
+        .where((partner) => partner.seeAgainPlayerIds.contains(me.id))
+        .toList()
+      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+
+    if (!mounted) return;
+    setState(() {
+      _mutualSeeAgainPlayers = matches;
+    });
+  }
 
   Future<void> _assignRoundPromptsIfNeeded(PlayerRecord partner) async {
     if (_sessionId == null || _player == null) return;
@@ -376,6 +469,8 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
           onSubmitCode: _submitPartnerCode,
           onDrawPrompt: _syncPromptDraw,
         );
+      case Stage.ended:
+        return EndedView(players: _mutualSeeAgainPlayers);
     }
   }
 
@@ -1032,6 +1127,39 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
   }
 }
 
+class EndedView extends StatelessWidget {
+  const EndedView({super.key, required this.players});
+
+  final List<PlayerRecord> players;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Round Results', style: Theme.of(context).textTheme.headlineSmall),
+        const SizedBox(height: 12),
+        const Text('Status: Ended'),
+        const SizedBox(height: 20),
+        if (players.isEmpty)
+          const Text('Thanks for playing!')
+        else ...[
+          const Text('You both said you would like to see each other again:'),
+          const SizedBox(height: 12),
+          ...players.map(
+            (player) => Card(
+              child: ListTile(
+                leading: const Text('👍', style: TextStyle(fontSize: 20)),
+                title: Text(player.name.isEmpty ? 'Another player' : player.name),
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
 class ErrorCard extends StatelessWidget {
   const ErrorCard({super.key, required this.message});
 
@@ -1181,6 +1309,7 @@ class PlayerRecord {
     this.currentPromptIndex = 0,
     this.currentRoundPrompts = const <String>[],
     this.askedPromptIds = const <String>[],
+    this.seeAgainPlayerIds = const <String>[],
   });
 
   final String id;
@@ -1199,6 +1328,7 @@ class PlayerRecord {
   int currentPromptIndex;
   List<String> currentRoundPrompts;
   List<String> askedPromptIds;
+  List<String> seeAgainPlayerIds;
 
   List<PromptItem> get currentRoundPromptItems =>
       currentRoundPrompts.map(PromptItem.fromStorage).toList();
@@ -1220,6 +1350,7 @@ class PlayerRecord {
       'currentPromptIndex': currentPromptIndex,
       'currentRoundPrompts': currentRoundPrompts,
       'askedPromptIds': askedPromptIds,
+      'seeAgainPlayerIds': seeAgainPlayerIds,
       'updatedAt': DateTime.now().toIso8601String(),
     };
   }
@@ -1247,8 +1378,27 @@ class PlayerRecord {
       askedPromptIds: ((json['askedPromptIds'] as List?) ?? const [])
           .map((item) => item.toString())
           .toList(),
+      seeAgainPlayerIds: _parseSeeAgainIds(json),
     );
   }
+}
+
+List<String> _parseSeeAgainIds(Map<String, dynamic> json) {
+  final raw = json['seeAgainPlayerIds'];
+  if (raw is List) {
+    return raw.map((item) => item.toString()).where((id) => id.isNotEmpty).toList();
+  }
+
+  final legacyRaw = json['seeAgain'];
+  if (legacyRaw is Map) {
+    return legacyRaw.entries
+        .where((entry) => entry.value == true)
+        .map((entry) => entry.key.toString())
+        .where((id) => id.isNotEmpty)
+        .toList();
+  }
+
+  return const <String>[];
 }
 
 class FirestoreSignupService {
@@ -1367,6 +1517,29 @@ class RtdbService {
           'pairedWith': null,
           'pairedRound': null,
           'partnerCode': null,
+          'updatedAt': DateTime.now().toIso8601String(),
+        },
+      ),
+    );
+    _throwIfNotOk(resp);
+  }
+
+  Future<void> setSeeAgainPreference({
+    required String sessionId,
+    required String playerId,
+    required String partnerId,
+  }) async {
+    final player = await fetchPlayer(sessionId, playerId);
+    final updated = {
+      ...player.seeAgainPlayerIds,
+      partnerId,
+    }.toList();
+
+    final resp = await http.patch(
+      _uri('${_sessionBasePath(sessionId)}/players/$playerId'),
+      body: jsonEncode(
+        {
+          'seeAgainPlayerIds': updated,
           'updatedAt': DateTime.now().toIso8601String(),
         },
       ),
