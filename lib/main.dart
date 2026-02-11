@@ -319,7 +319,6 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
     await _service.updateRoundPrompts(
       sessionId: _sessionId!,
       playerId: me.id,
-      round: round,
       promptEntries: promptStorageValues,
       askedPromptIds: mergedHistory,
     );
@@ -396,8 +395,29 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
           session: _session,
           error: _error,
           onSubmitCode: _submitPartnerCode,
+          onDrawPrompt: _syncPromptDraw,
         );
     }
+  }
+
+  Future<void> _syncPromptDraw({
+    required int promptIndex,
+    required String partnerId,
+  }) async {
+    if (_sessionId == null || _player == null) return;
+
+    await _service.syncPromptIndexForPair(
+      sessionId: _sessionId!,
+      me: _player!,
+      partnerId: partnerId,
+      promptIndex: promptIndex,
+    );
+
+    final refreshed = await _service.fetchPlayer(_sessionId!, _player!.id);
+    if (!mounted) return;
+    setState(() {
+      _player = refreshed;
+    });
   }
 }
 
@@ -866,23 +886,32 @@ class GameView extends StatefulWidget {
     required this.player,
     required this.session,
     required this.onSubmitCode,
+    required this.onDrawPrompt,
     this.error,
   });
 
   final PlayerRecord? player;
   final SessionRecord? session;
   final Future<void> Function(String code) onSubmitCode;
+  final Future<void> Function({
+    required int promptIndex,
+    required String partnerId,
+  }) onDrawPrompt;
   final String? error;
 
   @override
   State<GameView> createState() => _GameViewState();
 }
 
-class _GameViewState extends State<GameView> {
+class _GameViewState extends State<GameView> with TickerProviderStateMixin {
   final _codeCtrl = TextEditingController();
   bool _submitting = false;
-  int _promptIndex = 0;
   int? _seenRound;
+  int _animatedPromptIndex = 0;
+
+  late final AnimationController _flipController;
+  late final Animation<double> _flipAnimation;
+  late final AnimationController _splashController;
 
   @override
   void didUpdateWidget(covariant GameView oldWidget) {
@@ -890,13 +919,43 @@ class _GameViewState extends State<GameView> {
     final round = widget.session?.round;
     if (round != _seenRound) {
       _seenRound = round;
-      _promptIndex = 0;
+      _animatedPromptIndex = 0;
     }
+
+    final promptIndex = widget.player?.currentPromptIndex ?? 0;
+    if (promptIndex != _animatedPromptIndex) {
+      _animatedPromptIndex = promptIndex;
+      _flipController
+        ..reset()
+        ..forward();
+      _splashController
+        ..reset()
+        ..forward();
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _flipController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 550),
+    );
+    _flipAnimation = CurvedAnimation(
+      parent: _flipController,
+      curve: Curves.easeOutBack,
+    );
+    _splashController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 650),
+    );
   }
 
   @override
   void dispose() {
     _codeCtrl.dispose();
+    _flipController.dispose();
+    _splashController.dispose();
     super.dispose();
   }
 
@@ -904,6 +963,28 @@ class _GameViewState extends State<GameView> {
     if (_codeCtrl.text.trim().length < 4) return;
     setState(() => _submitting = true);
     await widget.onSubmitCode(_codeCtrl.text);
+    if (mounted) setState(() => _submitting = false);
+  }
+
+  Future<void> _drawNextPrompt() async {
+    final player = widget.player;
+    final prompts = player?.currentRoundPromptItems ?? const <PromptItem>[];
+    final currentRound = widget.session?.round;
+    if (player == null ||
+        player.pairedWith == null ||
+        currentRound == null ||
+        prompts.isEmpty) {
+      return;
+    }
+
+    final nextIndex = player.currentPromptIndex + 1;
+    if (nextIndex >= prompts.length) return;
+
+    setState(() => _submitting = true);
+    await widget.onDrawPrompt(
+      promptIndex: nextIndex,
+      partnerId: player.pairedWith!,
+    );
     if (mounted) setState(() => _submitting = false);
   }
 
@@ -915,6 +996,9 @@ class _GameViewState extends State<GameView> {
         player?.pairedRound != null &&
         player!.pairedRound == currentRound;
     final prompts = player?.currentRoundPromptItems ?? const <PromptItem>[];
+    final promptIndex = prompts.isEmpty
+        ? 0
+        : (player?.currentPromptIndex ?? 0).clamp(0, prompts.length - 1);
 
     return SingleChildScrollView(
       child: Column(
@@ -943,22 +1027,95 @@ class _GameViewState extends State<GameView> {
                     const SizedBox(height: 6),
                     Text('Partner player id: ${player?.pairedWith ?? '-'}'),
                     const SizedBox(height: 6),
-                    Text('Prompt ${prompts.isEmpty ? 0 : (_promptIndex + 1).clamp(1, prompts.length)} of ${prompts.length}'),
+                    Text('Prompt ${prompts.isEmpty ? 0 : (promptIndex + 1)} of ${prompts.length}'),
                   ],
                 ),
               ),
             ),
             if (prompts.isNotEmpty) ...[
               const SizedBox(height: 10),
-              Text(
-                prompts[_promptIndex.clamp(0, prompts.length - 1)].text,
-                style: Theme.of(context).textTheme.titleMedium,
+              SizedBox(
+                height: 240,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    for (var i = 0; i < max(0, prompts.length - promptIndex - 1).clamp(0, 3); i++)
+                      Transform.translate(
+                        offset: Offset(0, 10.0 + (i * 8)),
+                        child: Transform.rotate(
+                          angle: (i + 1) * 0.03,
+                          child: Container(
+                            width: 280,
+                            height: 180,
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(18),
+                              border: Border.all(color: Colors.indigo.shade100),
+                            ),
+                          ),
+                        ),
+                      ),
+                    AnimatedBuilder(
+                      animation: Listenable.merge([_flipAnimation, _splashController]),
+                      builder: (context, child) {
+                        final t = _flipAnimation.value;
+                        final tilt = pi * (1 - t);
+                        return Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            CustomPaint(
+                              size: const Size(320, 220),
+                              painter: ParticleSplashPainter(progress: _splashController.value),
+                            ),
+                            Transform(
+                              alignment: Alignment.center,
+                              transform: Matrix4.identity()
+                                ..setEntry(3, 2, 0.001)
+                                ..rotateY(tilt),
+                              child: child,
+                            ),
+                          ],
+                        );
+                      },
+                      child: Container(
+                        width: 300,
+                        height: 190,
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [Colors.indigo.shade400, Colors.purple.shade300],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          borderRadius: BorderRadius.circular(20),
+                          boxShadow: const [
+                            BoxShadow(
+                              blurRadius: 18,
+                              offset: Offset(0, 12),
+                              color: Color(0x33000000),
+                            ),
+                          ],
+                        ),
+                        child: Center(
+                          child: Text(
+                            prompts[promptIndex].text,
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
               const SizedBox(height: 10),
-              if (_promptIndex < prompts.length - 1)
+              if (promptIndex < prompts.length - 1)
                 FilledButton(
-                  onPressed: () => setState(() => _promptIndex += 1),
-                  child: const Text('Next prompt'),
+                  onPressed: _submitting ? null : _drawNextPrompt,
+                  child: Text(_submitting ? 'Drawing...' : 'Draw next card'),
                 )
               else
                 const Text('Round complete. Wait for next round to pair with someone new.'),
@@ -1010,6 +1167,39 @@ class ErrorCard extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+class ParticleSplashPainter extends CustomPainter {
+  const ParticleSplashPainter({required this.progress});
+
+  final double progress;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (progress <= 0 || progress >= 1) return;
+    final center = Offset(size.width / 2, size.height / 2);
+    final paint = Paint()..style = PaintingStyle.fill;
+    final particles = 20;
+
+    for (var i = 0; i < particles; i++) {
+      final angle = (2 * pi * i) / particles;
+      final distance = 18 + (progress * 105);
+      final wobble = sin(progress * 8 + i) * 6;
+      final offset = Offset(
+        cos(angle) * (distance + wobble),
+        sin(angle) * (distance + wobble),
+      );
+      final alpha = ((1 - progress) * 255).toInt().clamp(0, 255);
+      paint.color = Colors.primaries[i % Colors.primaries.length]
+          .withAlpha(alpha);
+      canvas.drawCircle(center + offset, 2 + (1 - progress) * 4, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant ParticleSplashPainter oldDelegate) {
+    return oldDelegate.progress != progress;
   }
 }
 
@@ -1108,6 +1298,7 @@ class PlayerRecord {
     this.pairedWith,
     this.pairedRound,
     this.currentPromptRound,
+    this.currentPromptIndex = 0,
     this.currentRoundPrompts = const <String>[],
     this.askedPromptIds = const <String>[],
   });
@@ -1125,6 +1316,7 @@ class PlayerRecord {
   String? pairedWith;
   int? pairedRound;
   int? currentPromptRound;
+  int currentPromptIndex;
   List<String> currentRoundPrompts;
   List<String> askedPromptIds;
 
@@ -1145,6 +1337,7 @@ class PlayerRecord {
       'pairedWith': pairedWith,
       'pairedRound': pairedRound,
       'currentPromptRound': currentPromptRound,
+      'currentPromptIndex': currentPromptIndex,
       'currentRoundPrompts': currentRoundPrompts,
       'askedPromptIds': askedPromptIds,
       'updatedAt': DateTime.now().toIso8601String(),
@@ -1167,6 +1360,7 @@ class PlayerRecord {
       pairedWith: json['pairedWith'] as String?,
       pairedRound: (json['pairedRound'] as num?)?.toInt(),
       currentPromptRound: (json['currentPromptRound'] as num?)?.toInt(),
+      currentPromptIndex: (json['currentPromptIndex'] as num?)?.toInt() ?? 0,
       currentRoundPrompts: ((json['currentRoundPrompts'] as List?) ?? const [])
           .map((item) => item.toString())
           .toList(),
@@ -1312,6 +1506,7 @@ class RtdbService {
       body: jsonEncode(
         {
           'currentPromptRound': round,
+          'currentPromptIndex': 0,
           'currentRoundPrompts': promptEntries,
           'askedPromptIds': askedPromptIds,
           'updatedAt': DateTime.now().toIso8601String(),
@@ -1319,6 +1514,30 @@ class RtdbService {
       ),
     );
     _throwIfNotOk(resp);
+  }
+
+  Future<void> syncPromptIndexForPair({
+    required String sessionId,
+    required PlayerRecord me,
+    required String partnerId,
+    required int promptIndex,
+  }) async {
+    final update = {
+      'currentPromptIndex': promptIndex,
+      'updatedAt': DateTime.now().toIso8601String(),
+    };
+
+    final meResp = await http.patch(
+      _uri('${_sessionBasePath(sessionId)}/players/${me.id}'),
+      body: jsonEncode(update),
+    );
+    _throwIfNotOk(meResp);
+
+    final partnerResp = await http.patch(
+      _uri('${_sessionBasePath(sessionId)}/players/$partnerId'),
+      body: jsonEncode(update),
+    );
+    _throwIfNotOk(partnerResp);
   }
 
   void _throwIfNotOk(http.Response response) {
