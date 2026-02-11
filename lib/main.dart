@@ -1112,8 +1112,10 @@ class FirestoreSignupService {
 class RtdbService {
   Uri _uri(String path) => Uri.parse('$_databaseBaseUrl/$path.json');
 
+  String _sessionBasePath(String sessionId) => 'mini/session/$sessionId';
+
   Future<SessionRecord> fetchSession(String sessionId) async {
-    final resp = await http.get(_uri('session/$sessionId'));
+    final resp = await http.get(_uri(_sessionBasePath(sessionId)));
     _throwIfNotOk(resp);
     final payload = jsonDecode(resp.body);
     if (payload is! Map<String, dynamic>) {
@@ -1124,14 +1126,14 @@ class RtdbService {
 
   Future<void> savePlayer(String sessionId, PlayerRecord player) async {
     final resp = await http.patch(
-      _uri('sessions/$sessionId/players/${player.id}'),
+      _uri('${_sessionBasePath(sessionId)}/players/${player.id}'),
       body: jsonEncode(player.toJson()),
     );
     _throwIfNotOk(resp);
   }
 
   Future<Map<String, PlayerRecord>> fetchPlayers(String sessionId) async {
-    final resp = await http.get(_uri('sessions/$sessionId/players'));
+    final resp = await http.get(_uri('${_sessionBasePath(sessionId)}/players'));
     _throwIfNotOk(resp);
     final payload = jsonDecode(resp.body);
     if (payload is! Map<String, dynamic>) return {};
@@ -1145,7 +1147,7 @@ class RtdbService {
   }
 
   Future<PlayerRecord> fetchPlayer(String sessionId, String playerId) async {
-    final resp = await http.get(_uri('sessions/$sessionId/players/$playerId'));
+    final resp = await http.get(_uri('${_sessionBasePath(sessionId)}/players/$playerId'));
     _throwIfNotOk(resp);
     final payload = jsonDecode(resp.body);
     if (payload is! Map<String, dynamic>) {
@@ -1174,7 +1176,7 @@ class RtdbService {
 
   Future<void> clearPairing(String sessionId, String playerId) async {
     final resp = await http.patch(
-      _uri('sessions/$sessionId/players/$playerId'),
+      _uri('${_sessionBasePath(sessionId)}/players/$playerId'),
       body: jsonEncode(
         {
           'pairedWith': null,
@@ -1195,7 +1197,7 @@ class RtdbService {
     required List<String> askedPromptIds,
   }) async {
     final resp = await http.patch(
-      _uri('sessions/$sessionId/players/$playerId'),
+      _uri('${_sessionBasePath(sessionId)}/players/$playerId'),
       body: jsonEncode(
         {
           'currentPromptRound': round,
