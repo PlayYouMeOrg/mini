@@ -51,11 +51,28 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
   @override
   void initState() {
     super.initState();
-    _sessionId =
-        Uri.base.queryParameters['session'] ?? Uri.base.queryParameters['sessionId'];
-    if (_sessionId == null || _sessionId!.trim().isEmpty) {
-      _error = 'Missing session query parameter (?session=your-session-id).';
+    _sessionId = Uri.base.queryParameters['session'] ??
+        Uri.base.queryParameters['sessionId'] ??
+        Uri.base.queryParameters['code'];
+    if (_sessionId != null && _sessionId!.trim().isEmpty) {
+      _sessionId = null;
     }
+  }
+
+  void _joinWithCode(String code) {
+    final trimmed = code.trim();
+    if (trimmed.isEmpty) {
+      setState(() {
+        _error = 'Please enter a valid session code.';
+      });
+      return;
+    }
+
+    setState(() {
+      _sessionId = trimmed;
+      _error = null;
+      _stage = Stage.signup;
+    });
   }
 
   @override
@@ -205,7 +222,10 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
 
   Widget _buildBody() {
     if (_sessionId == null) {
-      return ErrorCard(message: _error ?? 'Missing session ID');
+      return JoinWithCodeView(
+        error: _error,
+        onJoin: _joinWithCode,
+      );
     }
 
     switch (_stage) {
@@ -229,6 +249,75 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
           onSubmitCode: _submitPartnerCode,
         );
     }
+  }
+}
+
+class JoinWithCodeView extends StatefulWidget {
+  const JoinWithCodeView({
+    super.key,
+    required this.onJoin,
+    this.error,
+  });
+
+  final void Function(String code) onJoin;
+  final String? error;
+
+  @override
+  State<JoinWithCodeView> createState() => _JoinWithCodeViewState();
+}
+
+class _JoinWithCodeViewState extends State<JoinWithCodeView> {
+  final _codeCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _codeCtrl.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    widget.onJoin(_codeCtrl.text);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 360),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Join with Code', style: Theme.of(context).textTheme.headlineSmall),
+            const SizedBox(height: 12),
+            const Text('Enter your session code to join the signup flow.'),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _codeCtrl,
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => _submit(),
+              decoration: const InputDecoration(
+                labelText: 'Session code',
+                hintText: 'e.g. spring-mixer',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            if (widget.error != null) ...[
+              const SizedBox(height: 12),
+              Text(widget.error!, style: const TextStyle(color: Colors.red)),
+            ],
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: _submit,
+                child: const Text('Join session'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
