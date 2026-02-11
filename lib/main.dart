@@ -500,7 +500,7 @@ class _SignupFormState extends State<SignupForm> {
 
   String? _selectedGender;
   String? _selectedPreference;
-  RoundPreference? _roundPreference;
+  RoundPreference _roundPreference = RoundPreference.openingUp;
   bool _acceptedTermsAndGameTexts = false;
   bool _acceptedPromoTexts = false;
   bool _showTermsValidationError = false;
@@ -532,7 +532,7 @@ class _SignupFormState extends State<SignupForm> {
         sexualPreference: _selectedPreference!.trim(),
         acceptedTermsAndGameTexts: _acceptedTermsAndGameTexts,
         acceptedPromoTexts: _acceptedPromoTexts,
-        roundPreference: _roundPreference!,
+        roundPreference: _roundPreference,
       ),
     );
 
@@ -602,27 +602,46 @@ class _SignupFormState extends State<SignupForm> {
               ),
             ),
             const SizedBox(height: 12),
-            DropdownButtonFormField<RoundPreference>(
-              value: _roundPreference,
-              items: RoundPreference.values
-                  .map(
-                    (option) => DropdownMenuItem<RoundPreference>(
-                      value: option,
-                      child: Text(option.label),
-                    ),
-                  )
-                  .toList(),
-              onChanged: (value) {
-                setState(() {
-                  _roundPreference = value;
-                });
-              },
-              validator: (value) => value == null ? 'Required' : null,
+            InputDecorator(
               decoration: const InputDecoration(
                 labelText: 'Round style preference',
-                helperText:
-                    'Opening up enables deeper questions only when both partners agree.',
                 border: OutlineInputBorder(),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          _roundPreference.label,
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                      ),
+                      Switch(
+                        value: _roundPreference == RoundPreference.playful,
+                        onChanged: (isPlayful) {
+                          setState(() {
+                            _roundPreference = isPlayful
+                                ? RoundPreference.playful
+                                : RoundPreference.openingUp;
+                          });
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    _roundPreference == RoundPreference.openingUp
+                        ? 'Opening up asks deeper questions when both partners choose it.'
+                        : 'Playful keeps the round light and fun with easier prompts.',
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodySmall
+                        ?.copyWith(color: Theme.of(context).hintColor),
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 12),
