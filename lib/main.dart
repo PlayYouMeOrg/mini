@@ -1223,7 +1223,7 @@ class FirestoreSignupService {
 class RtdbService {
   Uri _uri(String path) => Uri.parse('$_databaseBaseUrl/$path.json');
 
-  String _sessionBasePath(String sessionId) => 'mini/session/$sessionId';
+  String _sessionBasePath(String sessionId) => 'mini/sessions/$sessionId';
 
   Future<SessionRecord> fetchSession(String sessionId) async {
     final resp = await http.get(_uri(_sessionBasePath(sessionId)));
