@@ -309,6 +309,7 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
     await _service.updateRoundPrompts(
       sessionId: _sessionId!,
       playerId: me.id,
+      round: round,
       promptEntries: promptStorageValues,
       askedPromptIds: mergedHistory,
     );
