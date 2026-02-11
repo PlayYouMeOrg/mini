@@ -30,7 +30,7 @@ class MiniApp extends StatelessWidget {
   }
 }
 
-enum Stage { signup, phoneAuth, waiting, game }
+enum Stage { signup, waiting, game }
 
 enum RoundPreference { openingUp, playful }
 
@@ -59,7 +59,6 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
   String? _error;
   Timer? _poller;
   String? _initialSessionStatus;
-  SignupPayload? _pendingSignup;
   PromptCatalog? _promptCatalog;
 
   @override
@@ -135,15 +134,7 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
   }
 
   Future<void> _handleSignup(SignupPayload payload) async {
-    setState(() {
-      _error = null;
-      _pendingSignup = payload;
-      _stage = Stage.phoneAuth;
-    });
-  }
-
-  Future<void> _handlePhoneAuth() async {
-    if (_sessionId == null || _pendingSignup == null) return;
+    if (_sessionId == null) return;
 
     setState(() {
       _error = null;
@@ -153,7 +144,7 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
       final session = await _service.fetchSession(_sessionId!);
       final playerId = _generateId();
       final inviteCode = _generateInviteCode();
-      final signup = _pendingSignup!;
+      final signup = payload;
       final player = PlayerRecord(
         id: playerId,
         name: signup.name,
@@ -177,7 +168,6 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
         _session = session;
         _player = player;
         _playerId = playerId;
-        _pendingSignup = null;
         _stage = Stage.waiting;
       });
 
@@ -377,18 +367,6 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
           session: _session,
           error: _error,
         );
-      case Stage.phoneAuth:
-        return PhoneAuthView(
-          phoneNumber: _pendingSignup?.phone,
-          error: _error,
-          onAuthenticate: _handlePhoneAuth,
-          onBack: () {
-            setState(() {
-              _error = null;
-              _stage = Stage.signup;
-            });
-          },
-        );
       case Stage.game:
         return GameView(
           player: _player,
@@ -572,7 +550,7 @@ class _SignupFormState extends State<SignupForm> {
             Text('Join session ${widget.sessionId}',
                 style: Theme.of(context).textTheme.headlineSmall),
             const SizedBox(height: 12),
-            const Text('Sign up to enter the game round queue.'),
+            const Text('Sign up and authenticate to enter the game round queue.'),
             const SizedBox(height: 24),
             _input(_nameCtrl, 'Name'),
             const SizedBox(height: 12),
@@ -711,7 +689,9 @@ class _SignupFormState extends State<SignupForm> {
               width: double.infinity,
               child: FilledButton(
                 onPressed: _submitting ? null : _submit,
-                child: Text(_submitting ? 'Signing up...' : 'Sign up'),
+                child: Text(
+                  _submitting ? 'Signing up...' : 'Sign up and authenticate',
+                ),
               ),
             ),
           ],
@@ -775,107 +755,6 @@ class WaitingView extends StatelessWidget {
           Text(error!, style: const TextStyle(color: Colors.red)),
         ]
       ],
-    );
-  }
-}
-
-class PhoneAuthView extends StatefulWidget {
-  const PhoneAuthView({
-    super.key,
-    required this.phoneNumber,
-    required this.onAuthenticate,
-    required this.onBack,
-    this.error,
-  });
-
-  final String? phoneNumber;
-  final Future<void> Function() onAuthenticate;
-  final VoidCallback onBack;
-  final String? error;
-
-  @override
-  State<PhoneAuthView> createState() => _PhoneAuthViewState();
-}
-
-class _PhoneAuthViewState extends State<PhoneAuthView> {
-  final _formKey = GlobalKey<FormState>();
-  final _phoneCtrl = TextEditingController();
-  bool _submitting = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _phoneCtrl.text = widget.phoneNumber ?? '';
-  }
-
-  @override
-  void dispose() {
-    _phoneCtrl.dispose();
-    super.dispose();
-  }
-
-  Future<void> _authenticate() async {
-    if (!_formKey.currentState!.validate()) return;
-    setState(() => _submitting = true);
-    await widget.onAuthenticate();
-    if (mounted) {
-      setState(() => _submitting = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Form(
-      key: _formKey,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Phone authentication',
-              style: Theme.of(context).textTheme.headlineSmall),
-          const SizedBox(height: 12),
-          const Text(
-            'Complete phone authentication to finish account creation and join the session.',
-          ),
-          const SizedBox(height: 20),
-          TextFormField(
-            controller: _phoneCtrl,
-            keyboardType: TextInputType.phone,
-            validator: (value) {
-              if (value == null || value.trim().isEmpty) return 'Required';
-              if (value.trim() != widget.phoneNumber?.trim()) {
-                return 'Phone number must match the create form entry.';
-              }
-              return null;
-            },
-            decoration: const InputDecoration(
-              labelText: 'Phone number',
-              border: OutlineInputBorder(),
-            ),
-          ),
-          if (widget.error != null) ...[
-            const SizedBox(height: 12),
-            Text(widget.error!, style: const TextStyle(color: Colors.red)),
-          ],
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: _submitting ? null : widget.onBack,
-                  child: const Text('Back'),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: FilledButton(
-                  onPressed: _submitting ? null : _authenticate,
-                  child: Text(_submitting ? 'Authenticating...' : 'Authenticate'),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
     );
   }
 }
