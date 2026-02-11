@@ -12,3 +12,5 @@ dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - Prompts/Dating/prompt_set_x.json
