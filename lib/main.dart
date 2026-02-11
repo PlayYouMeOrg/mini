@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 
 const _databaseBaseUrl =
     'https://youmedev-feab4-default-rtdb.firebaseio.com';
+const _firestoreProjectId = 'youmedev-feab4';
 
 void main() {
   runApp(const MiniApp());
@@ -38,6 +39,7 @@ class SessionFlowPage extends StatefulWidget {
 
 class _SessionFlowPageState extends State<SessionFlowPage> {
   final _service = RtdbService();
+  final _firestoreService = FirestoreSignupService();
 
   Stage _stage = Stage.signup;
   String? _sessionId;
@@ -108,10 +110,16 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
         phone: signup.phone,
         gender: signup.gender,
         sexualPreference: signup.sexualPreference,
+        acceptedTermsAndGameTexts: signup.acceptedTermsAndGameTexts,
+        acceptedPromoTexts: signup.acceptedPromoTexts,
         inviteCode: inviteCode,
       );
 
       await _service.savePlayer(_sessionId!, player);
+      await _firestoreService.saveSignup(
+        sessionId: _sessionId!,
+        player: player,
+      );
 
       _initialSessionStatus = session.status;
       setState(() {
@@ -364,29 +372,47 @@ class _SignupFormState extends State<SignupForm> {
   final _formKey = GlobalKey<FormState>();
   final _nameCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
-  final _genderCtrl = TextEditingController();
-  final _prefCtrl = TextEditingController();
+  static const _genderOptions = ['Woman', 'Man', 'Non-binary', 'Other'];
+  static const _preferenceOptions = [
+    'Women',
+    'Men',
+    'Everyone',
+    'Prefer not to say',
+  ];
+
+  String? _selectedGender;
+  String? _selectedPreference;
+  bool _acceptedTermsAndGameTexts = false;
+  bool _acceptedPromoTexts = false;
+  bool _showTermsValidationError = false;
   bool _submitting = false;
 
   @override
   void dispose() {
     _nameCtrl.dispose();
     _phoneCtrl.dispose();
-    _genderCtrl.dispose();
-    _prefCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _submit() async {
-    if (!_formKey.currentState!.validate()) return;
+    final isFormValid = _formKey.currentState!.validate();
+    if (!_acceptedTermsAndGameTexts) {
+      setState(() {
+        _showTermsValidationError = true;
+      });
+    }
+    if (!isFormValid || !_acceptedTermsAndGameTexts) return;
+
     setState(() => _submitting = true);
 
     await widget.onSubmit(
       SignupPayload(
         name: _nameCtrl.text.trim(),
         phone: _phoneCtrl.text.trim(),
-        gender: _genderCtrl.text.trim(),
-        sexualPreference: _prefCtrl.text.trim(),
+        gender: _selectedGender!.trim(),
+        sexualPreference: _selectedPreference!.trim(),
+        acceptedTermsAndGameTexts: _acceptedTermsAndGameTexts,
+        acceptedPromoTexts: _acceptedPromoTexts,
       ),
     );
 
@@ -412,9 +438,87 @@ class _SignupFormState extends State<SignupForm> {
             const SizedBox(height: 12),
             _input(_phoneCtrl, 'Phone number', phone: true),
             const SizedBox(height: 12),
-            _input(_genderCtrl, 'Gender'),
+            DropdownButtonFormField<String>(
+              value: _selectedGender,
+              items: _genderOptions
+                  .map(
+                    (option) => DropdownMenuItem<String>(
+                      value: option,
+                      child: Text(option),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (value) {
+                setState(() {
+                  _selectedGender = value;
+                });
+              },
+              validator: (value) => value == null ? 'Required' : null,
+              decoration: const InputDecoration(
+                labelText: 'Gender',
+                border: OutlineInputBorder(),
+              ),
+            ),
             const SizedBox(height: 12),
-            _input(_prefCtrl, 'Sexual preference'),
+            DropdownButtonFormField<String>(
+              value: _selectedPreference,
+              items: _preferenceOptions
+                  .map(
+                    (option) => DropdownMenuItem<String>(
+                      value: option,
+                      child: Text(option),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (value) {
+                setState(() {
+                  _selectedPreference = value;
+                });
+              },
+              validator: (value) => value == null ? 'Required' : null,
+              decoration: const InputDecoration(
+                labelText: 'Sexual preference',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            CheckboxListTile(
+              value: _acceptedTermsAndGameTexts,
+              onChanged: (value) {
+                setState(() {
+                  _acceptedTermsAndGameTexts = value ?? false;
+                  if (_acceptedTermsAndGameTexts) {
+                    _showTermsValidationError = false;
+                  }
+                });
+              },
+              controlAffinity: ListTileControlAffinity.leading,
+              contentPadding: EdgeInsets.zero,
+              title: const Text(
+                'I confirm I read the Terms and Conditions '
+                '(Playyoume.com/termsandconditions) and agree to receive '
+                'text messages related to the game.',
+              ),
+              subtitle: _showTermsValidationError && !_acceptedTermsAndGameTexts
+                  ? const Text(
+                      'Required',
+                      style: TextStyle(color: Colors.red),
+                    )
+                  : null,
+            ),
+            CheckboxListTile(
+              value: _acceptedPromoTexts,
+              onChanged: (value) {
+                setState(() {
+                  _acceptedPromoTexts = value ?? false;
+                });
+              },
+              controlAffinity: ListTileControlAffinity.leading,
+              contentPadding: EdgeInsets.zero,
+              title: const Text(
+                'Optional: I agree to receive promotional text messages.',
+              ),
+            ),
             if (widget.error != null) ...[
               const SizedBox(height: 12),
               Text(widget.error!, style: const TextStyle(color: Colors.red)),
@@ -718,12 +822,16 @@ class SignupPayload {
     required this.phone,
     required this.gender,
     required this.sexualPreference,
+    required this.acceptedTermsAndGameTexts,
+    required this.acceptedPromoTexts,
   });
 
   final String name;
   final String phone;
   final String gender;
   final String sexualPreference;
+  final bool acceptedTermsAndGameTexts;
+  final bool acceptedPromoTexts;
 }
 
 class SessionRecord {
@@ -747,6 +855,8 @@ class PlayerRecord {
     required this.phone,
     required this.gender,
     required this.sexualPreference,
+    required this.acceptedTermsAndGameTexts,
+    required this.acceptedPromoTexts,
     required this.inviteCode,
     this.partnerCode,
     this.pairedWith,
@@ -758,6 +868,8 @@ class PlayerRecord {
   final String phone;
   final String gender;
   final String sexualPreference;
+  final bool acceptedTermsAndGameTexts;
+  final bool acceptedPromoTexts;
   final String inviteCode;
   String? partnerCode;
   String? pairedWith;
@@ -769,6 +881,8 @@ class PlayerRecord {
       'phone': phone,
       'gender': gender,
       'sexualPreference': sexualPreference,
+      'acceptedTermsAndGameTexts': acceptedTermsAndGameTexts,
+      'acceptedPromoTexts': acceptedPromoTexts,
       'inviteCode': inviteCode,
       'partnerCode': partnerCode,
       'pairedWith': pairedWith,
@@ -784,10 +898,55 @@ class PlayerRecord {
       phone: (json['phone'] ?? '') as String,
       gender: (json['gender'] ?? '') as String,
       sexualPreference: (json['sexualPreference'] ?? '') as String,
+      acceptedTermsAndGameTexts:
+          (json['acceptedTermsAndGameTexts'] ?? false) as bool,
+      acceptedPromoTexts: (json['acceptedPromoTexts'] ?? false) as bool,
       inviteCode: (json['inviteCode'] ?? '') as String,
       partnerCode: json['partnerCode'] as String?,
       pairedWith: json['pairedWith'] as String?,
       pairedRound: (json['pairedRound'] as num?)?.toInt(),
+    );
+  }
+}
+
+class FirestoreSignupService {
+  Uri _uri(String path) => Uri.https(
+        'firestore.googleapis.com',
+        '/v1/projects/$_firestoreProjectId/databases/(default)/documents/$path',
+      );
+
+  Future<void> saveSignup({
+    required String sessionId,
+    required PlayerRecord player,
+  }) async {
+    final response = await http.patch(
+      _uri('signups/${player.id}'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'fields': {
+          'sessionId': {'stringValue': sessionId},
+          'playerId': {'stringValue': player.id},
+          'name': {'stringValue': player.name},
+          'phone': {'stringValue': player.phone},
+          'gender': {'stringValue': player.gender},
+          'sexualPreference': {'stringValue': player.sexualPreference},
+          'inviteCode': {'stringValue': player.inviteCode},
+          'acceptedTermsAndGameTexts': {
+            'booleanValue': player.acceptedTermsAndGameTexts,
+          },
+          'acceptedPromoTexts': {
+            'booleanValue': player.acceptedPromoTexts,
+          },
+          'createdAt': {'timestampValue': DateTime.now().toUtc().toIso8601String()},
+        },
+      }),
+    );
+
+    if (response.statusCode >= 200 && response.statusCode < 300) return;
+
+    throw StateError(
+      'Firestore save failed: HTTP ${response.statusCode} '
+      '${response.reasonPhrase ?? ''} ${response.body}',
     );
   }
 }
