@@ -1,0 +1,36 @@
+{
+  "dating": {
+    "promptPool1": [
+      {"id": "p1_hotdog", "text": "Is a hot dog a sandwich? Defend your answer in 30 seconds."},
+      {"id": "p1_time_travel", "text": "If you could time travel to any decade for one day, where would you go and why?"},
+      {"id": "p1_aliens", "text": "Aliens land tonight—what song are you playing to represent humanity?"},
+      {"id": "p1_pineapple", "text": "Pineapple on pizza: genius or crime?"},
+      {"id": "p1_pet_voice", "text": "If pets could talk for one minute per day, what would your pet ask you first?"},
+      {"id": "p1_superpower", "text": "Would you rather fly or be invisible, and what is the first thing you'd do?"}
+    ],
+    "promptPool2": [
+      {"id": "p2_shot", "text": "Complete a celebratory shot together (or a mocktail cheers if preferred)."},
+      {"id": "p2_hat_selfie", "text": "Take a silly selfie while one of you borrows someone else's hat."},
+      {"id": "p2_toast", "text": "Create a 10-second dramatic toast to the room and clink glasses."},
+      {"id": "p2_dance", "text": "Do a 15-second synchronized dance move near the bar."},
+      {"id": "p2_stranger_cheers", "text": "Find another pair and do a four-person cheers together."},
+      {"id": "p2_napkin_art", "text": "Draw each other as stick-figure superheroes on a napkin."}
+    ],
+    "promptPool3": [
+      {"id": "p3_grateful", "text": "What is something in your life you feel genuinely grateful for right now?"},
+      {"id": "p3_growth", "text": "What has been one of your biggest growth moments in the last year?"},
+      {"id": "p3_supported", "text": "When do you feel most supported in relationships?"},
+      {"id": "p3_vulnerable", "text": "What is one truth you wish people understood about you sooner?"},
+      {"id": "p3_values", "text": "Which value is non-negotiable for you in a partner, and why?"},
+      {"id": "p3_dream", "text": "What dream are you actively working toward, even if slowly?"}
+    ],
+    "promptPool4": [
+      {"id": "p4_green_flags", "text": "What are your top green flags when dating someone new?"},
+      {"id": "p4_red_flags", "text": "What are some red flags you look for early on?"},
+      {"id": "p4_first_date", "text": "What is your ideal low-pressure first date?"},
+      {"id": "p4_texting", "text": "Are you a fast texter or a delayed responder, and why?"},
+      {"id": "p4_fun_fact", "text": "What random fun fact about you usually surprises people?"},
+      {"id": "p4_weekend", "text": "What does your perfect weekend look like?"}
+    ]
+  }
+}

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 
 const _databaseBaseUrl =
@@ -30,6 +31,12 @@ class MiniApp extends StatelessWidget {
 
 enum Stage { signup, phoneAuth, waiting, game }
 
+enum RoundPreference { openingUp, playful }
+
+extension RoundPreferenceLabel on RoundPreference {
+  String get label => this == RoundPreference.openingUp ? 'Opening up' : 'Playful';
+}
+
 class SessionFlowPage extends StatefulWidget {
   const SessionFlowPage({super.key});
 
@@ -40,6 +47,7 @@ class SessionFlowPage extends StatefulWidget {
 class _SessionFlowPageState extends State<SessionFlowPage> {
   final _service = RtdbService();
   final _firestoreService = FirestoreSignupService();
+  final _promptCatalogService = PromptCatalogService();
 
   Stage _stage = Stage.signup;
   String? _sessionId;
@@ -50,6 +58,7 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
   Timer? _poller;
   String? _initialSessionStatus;
   SignupPayload? _pendingSignup;
+  PromptCatalog? _promptCatalog;
 
   @override
   void initState() {
@@ -112,6 +121,7 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
         sexualPreference: signup.sexualPreference,
         acceptedTermsAndGameTexts: signup.acceptedTermsAndGameTexts,
         acceptedPromoTexts: signup.acceptedPromoTexts,
+        roundPreference: signup.roundPreference,
         inviteCode: inviteCode,
       );
 
@@ -164,13 +174,10 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
           _error = null;
         });
 
-        if (_stage == Stage.waiting) {
-          final hasStatusChanged = session.status != _initialSessionStatus;
-          if (hasStatusChanged) {
-            setState(() {
-              _stage = Stage.game;
-            });
-          }
+        if (_stage == Stage.waiting && _isSessionLive(session.status)) {
+          setState(() {
+            _stage = Stage.game;
+          });
         }
       } catch (e) {
         if (!mounted) return;
@@ -200,6 +207,8 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
         enteredCode: normalized,
       );
 
+      await _assignRoundPromptsIfNeeded(partner);
+
       final refreshed = await _service.fetchPlayer(_sessionId!, _player!.id);
       setState(() {
         _player = refreshed;
@@ -213,6 +222,68 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
         _error = 'Failed to pair: $e';
       });
     }
+  }
+
+  bool _isSessionLive(String? status) => status?.trim().toLowerCase() == 'live';
+
+  Future<void> _assignRoundPromptsIfNeeded(PlayerRecord partner) async {
+    if (_sessionId == null || _player == null) return;
+    final round = _session?.round;
+    if (round == null) return;
+
+    _promptCatalog ??= await _promptCatalogService.loadDatingCatalog();
+    final catalog = _promptCatalog!;
+    final me = _player!;
+
+    if (me.currentPromptRound == round && me.currentRoundPrompts.length == 3) {
+      return;
+    }
+
+    final partnerRefreshed = await _service.fetchPlayer(_sessionId!, partner.id);
+
+    List<PromptItem> prompts;
+    if (partnerRefreshed.currentPromptRound == round &&
+        partnerRefreshed.currentRoundPrompts.length == 3) {
+      prompts = partnerRefreshed.currentRoundPromptItems;
+    } else {
+      final seenIds = {
+        ...me.askedPromptIds,
+        ...partnerRefreshed.askedPromptIds,
+      };
+      final pool1 = catalog.pickUnused('promptPool1', seenIds);
+      final pool2 = catalog.pickUnused('promptPool2', seenIds);
+      final finalPool =
+          me.roundPreference == RoundPreference.openingUp &&
+                  partnerRefreshed.roundPreference == RoundPreference.openingUp
+              ? 'promptPool3'
+              : 'promptPool4';
+      final pool3Or4 = catalog.pickUnused(finalPool, seenIds);
+      prompts = [pool1, pool2, pool3Or4];
+    }
+
+    final promptStorageValues = prompts.map((prompt) => prompt.toStorage()).toList();
+
+    final mergedHistory = {
+      ...me.askedPromptIds,
+      ...partnerRefreshed.askedPromptIds,
+      ...prompts.map((prompt) => prompt.id),
+    }.toList();
+
+    await _service.updateRoundPrompts(
+      sessionId: _sessionId!,
+      playerId: me.id,
+      round: round,
+      promptEntries: promptStorageValues,
+      askedPromptIds: mergedHistory,
+    );
+
+    await _service.updateRoundPrompts(
+      sessionId: _sessionId!,
+      playerId: partnerRefreshed.id,
+      round: round,
+      promptEntries: promptStorageValues,
+      askedPromptIds: mergedHistory,
+    );
   }
 
   @override
@@ -382,6 +453,7 @@ class _SignupFormState extends State<SignupForm> {
 
   String? _selectedGender;
   String? _selectedPreference;
+  RoundPreference? _roundPreference;
   bool _acceptedTermsAndGameTexts = false;
   bool _acceptedPromoTexts = false;
   bool _showTermsValidationError = false;
@@ -413,6 +485,7 @@ class _SignupFormState extends State<SignupForm> {
         sexualPreference: _selectedPreference!.trim(),
         acceptedTermsAndGameTexts: _acceptedTermsAndGameTexts,
         acceptedPromoTexts: _acceptedPromoTexts,
+        roundPreference: _roundPreference!,
       ),
     );
 
@@ -478,6 +551,30 @@ class _SignupFormState extends State<SignupForm> {
               validator: (value) => value == null ? 'Required' : null,
               decoration: const InputDecoration(
                 labelText: 'Sexual preference',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<RoundPreference>(
+              value: _roundPreference,
+              items: RoundPreference.values
+                  .map(
+                    (option) => DropdownMenuItem<RoundPreference>(
+                      value: option,
+                      child: Text(option.label),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (value) {
+                setState(() {
+                  _roundPreference = value;
+                });
+              },
+              validator: (value) => value == null ? 'Required' : null,
+              decoration: const InputDecoration(
+                labelText: 'Round style preference',
+                helperText:
+                    'Opening up enables deeper questions only when both partners agree.',
                 border: OutlineInputBorder(),
               ),
             ),
@@ -718,6 +815,18 @@ class GameView extends StatefulWidget {
 class _GameViewState extends State<GameView> {
   final _codeCtrl = TextEditingController();
   bool _submitting = false;
+  int _promptIndex = 0;
+  int? _seenRound;
+
+  @override
+  void didUpdateWidget(covariant GameView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final round = widget.session?.round;
+    if (round != _seenRound) {
+      _seenRound = round;
+      _promptIndex = 0;
+    }
+  }
 
   @override
   void dispose() {
@@ -739,6 +848,7 @@ class _GameViewState extends State<GameView> {
     final isPairedThisRound = player?.pairedWith != null &&
         player?.pairedRound != null &&
         player!.pairedRound == currentRound;
+    final prompts = player?.currentRoundPromptItems ?? const <PromptItem>[];
 
     return SingleChildScrollView(
       child: Column(
@@ -766,10 +876,31 @@ class _GameViewState extends State<GameView> {
                     const Text('Paired for this round'),
                     const SizedBox(height: 6),
                     Text('Partner player id: ${player?.pairedWith ?? '-'}'),
+                    const SizedBox(height: 6),
+                    Text('Prompt ${prompts.isEmpty ? 0 : (_promptIndex + 1).clamp(1, prompts.length)} of ${prompts.length}'),
                   ],
                 ),
               ),
             ),
+            if (prompts.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Text(
+                prompts[_promptIndex.clamp(0, prompts.length - 1)].text,
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 10),
+              if (_promptIndex < prompts.length - 1)
+                FilledButton(
+                  onPressed: () => setState(() => _promptIndex += 1),
+                  child: const Text('Next prompt'),
+                )
+              else
+                const Text('Round complete. Wait for next round to pair with someone new.'),
+            ] else
+              const Padding(
+                padding: EdgeInsets.only(top: 10),
+                child: Text('Prompts are syncing. Ask your partner to submit your code too.'),
+              ),
           ] else ...[
             const Text('Enter someone else\'s 4-character code to pair:'),
             const SizedBox(height: 8),
@@ -824,6 +955,7 @@ class SignupPayload {
     required this.sexualPreference,
     required this.acceptedTermsAndGameTexts,
     required this.acceptedPromoTexts,
+    required this.roundPreference,
   });
 
   final String name;
@@ -832,6 +964,7 @@ class SignupPayload {
   final String sexualPreference;
   final bool acceptedTermsAndGameTexts;
   final bool acceptedPromoTexts;
+  final RoundPreference roundPreference;
 }
 
 class SessionRecord {
@@ -857,10 +990,14 @@ class PlayerRecord {
     required this.sexualPreference,
     required this.acceptedTermsAndGameTexts,
     required this.acceptedPromoTexts,
+    required this.roundPreference,
     required this.inviteCode,
     this.partnerCode,
     this.pairedWith,
     this.pairedRound,
+    this.currentPromptRound,
+    this.currentRoundPrompts = const <String>[],
+    this.askedPromptIds = const <String>[],
   });
 
   final String id;
@@ -870,10 +1007,17 @@ class PlayerRecord {
   final String sexualPreference;
   final bool acceptedTermsAndGameTexts;
   final bool acceptedPromoTexts;
+  final RoundPreference roundPreference;
   final String inviteCode;
   String? partnerCode;
   String? pairedWith;
   int? pairedRound;
+  int? currentPromptRound;
+  List<String> currentRoundPrompts;
+  List<String> askedPromptIds;
+
+  List<PromptItem> get currentRoundPromptItems =>
+      currentRoundPrompts.map(PromptItem.fromStorage).toList();
 
   Map<String, dynamic> toJson() {
     return {
@@ -883,10 +1027,14 @@ class PlayerRecord {
       'sexualPreference': sexualPreference,
       'acceptedTermsAndGameTexts': acceptedTermsAndGameTexts,
       'acceptedPromoTexts': acceptedPromoTexts,
+      'roundPreference': roundPreference.name,
       'inviteCode': inviteCode,
       'partnerCode': partnerCode,
       'pairedWith': pairedWith,
       'pairedRound': pairedRound,
+      'currentPromptRound': currentPromptRound,
+      'currentRoundPrompts': currentRoundPrompts,
+      'askedPromptIds': askedPromptIds,
       'updatedAt': DateTime.now().toIso8601String(),
     };
   }
@@ -901,10 +1049,18 @@ class PlayerRecord {
       acceptedTermsAndGameTexts:
           (json['acceptedTermsAndGameTexts'] ?? false) as bool,
       acceptedPromoTexts: (json['acceptedPromoTexts'] ?? false) as bool,
+      roundPreference: _roundPreferenceFromString(json['roundPreference'] as String?),
       inviteCode: (json['inviteCode'] ?? '') as String,
       partnerCode: json['partnerCode'] as String?,
       pairedWith: json['pairedWith'] as String?,
       pairedRound: (json['pairedRound'] as num?)?.toInt(),
+      currentPromptRound: (json['currentPromptRound'] as num?)?.toInt(),
+      currentRoundPrompts: ((json['currentRoundPrompts'] as List?) ?? const [])
+          .map((item) => item.toString())
+          .toList(),
+      askedPromptIds: ((json['askedPromptIds'] as List?) ?? const [])
+          .map((item) => item.toString())
+          .toList(),
     );
   }
 }
@@ -931,6 +1087,7 @@ class FirestoreSignupService {
           'gender': {'stringValue': player.gender},
           'sexualPreference': {'stringValue': player.sexualPreference},
           'inviteCode': {'stringValue': player.inviteCode},
+          'roundPreference': {'stringValue': player.roundPreference.name},
           'acceptedTermsAndGameTexts': {
             'booleanValue': player.acceptedTermsAndGameTexts,
           },
@@ -1029,11 +1186,105 @@ class RtdbService {
     _throwIfNotOk(resp);
   }
 
+  Future<void> updateRoundPrompts({
+    required String sessionId,
+    required String playerId,
+    required int round,
+    required List<String> promptEntries,
+    required List<String> askedPromptIds,
+  }) async {
+    final resp = await http.patch(
+      _uri('sessions/$sessionId/players/$playerId'),
+      body: jsonEncode(
+        {
+          'currentPromptRound': round,
+          'currentRoundPrompts': promptEntries,
+          'askedPromptIds': askedPromptIds,
+          'updatedAt': DateTime.now().toIso8601String(),
+        },
+      ),
+    );
+    _throwIfNotOk(resp);
+  }
+
   void _throwIfNotOk(http.Response response) {
     if (response.statusCode >= 200 && response.statusCode < 300) return;
     throw StateError(
       'HTTP ${response.statusCode} ${response.reasonPhrase ?? ''}: ${response.body}',
     );
+  }
+}
+
+RoundPreference _roundPreferenceFromString(String? raw) {
+  if (raw == RoundPreference.openingUp.name) {
+    return RoundPreference.openingUp;
+  }
+  return RoundPreference.playful;
+}
+
+class PromptItem {
+  const PromptItem({required this.id, required this.text});
+
+  final String id;
+  final String text;
+
+  String toStorage() => '$id::$text';
+
+  factory PromptItem.fromStorage(String value) {
+    final separatorIndex = value.indexOf('::');
+    if (separatorIndex == -1) {
+      return PromptItem(id: value, text: value);
+    }
+    return PromptItem(
+      id: value.substring(0, separatorIndex),
+      text: value.substring(separatorIndex + 2),
+    );
+  }
+}
+
+class PromptCatalog {
+  const PromptCatalog({required this.pools});
+
+  final Map<String, List<PromptItem>> pools;
+
+  PromptItem pickUnused(String poolName, Set<String> usedIds) {
+    final options = pools[poolName] ?? const <PromptItem>[];
+    if (options.isEmpty) {
+      throw StateError('Prompt pool $poolName is empty.');
+    }
+
+    final unused = options.where((item) => !usedIds.contains(item.id)).toList();
+    final source = unused.isNotEmpty ? unused : options;
+    final index = Random.secure().nextInt(source.length);
+    return source[index];
+  }
+}
+
+class PromptCatalogService {
+  Future<PromptCatalog> loadDatingCatalog() async {
+    final raw = await rootBundle.loadString('Prompts/Dating/prompt_set_x.json');
+    final decoded = jsonDecode(raw) as Map<String, dynamic>;
+    final dating = decoded['dating'] as Map<String, dynamic>?;
+    if (dating == null) {
+      throw StateError('Missing dating prompt bucket in prompt_set_x.json');
+    }
+
+    final pools = dating.map(
+      (key, value) => MapEntry(
+        key,
+        ((value as List?) ?? const [])
+            .map(
+              (item) => PromptItem(
+                id: (item['id'] ?? '').toString(),
+                text: (item['text'] ?? '').toString(),
+              ),
+            )
+            .where((item) => item.id.isNotEmpty && item.text.isNotEmpty)
+            .toList(),
+      ),
+    );
+
+    return PromptCatalog(pools: pools);
   }
 }
 
