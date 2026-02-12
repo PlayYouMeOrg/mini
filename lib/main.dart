@@ -15,6 +15,10 @@ void main() {
   runApp(const MiniApp());
 }
 
+const _creme = Color(0xFFF2E8D5);
+const _warmCreme = Color(0xFFE8D8BC);
+const _inkBlack = Color(0xFF111111);
+
 class MiniApp extends StatelessWidget {
   const MiniApp({super.key});
 
@@ -23,7 +27,20 @@ class MiniApp extends StatelessWidget {
     return MaterialApp(
       title: 'Session Joiner',
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: _warmCreme,
+          brightness: Brightness.light,
+        ).copyWith(
+          surface: _creme,
+          onSurface: _inkBlack,
+          primary: _inkBlack,
+          onPrimary: _creme,
+        ),
+        scaffoldBackgroundColor: _creme,
+        cardTheme: CardThemeData(
+          color: const Color(0xFFF7EEDB),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        ),
       ),
       home: const SessionFlowPage(),
     );
@@ -419,23 +436,32 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Center(
-        child: Container(
-          color: const Color(0xFFF4F6FC),
-          child: FittedBox(
-            fit: BoxFit.contain,
-            child: SizedBox(
-              width: 390,
-              height: 844,
-              child: SafeArea(
-                child: Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: _buildBody(),
+      body: Stack(
+        children: [
+          Center(
+            child: Container(
+              color: _creme,
+              child: FittedBox(
+                fit: BoxFit.contain,
+                child: SizedBox(
+                  width: 390,
+                  height: 844,
+                  child: SafeArea(
+                    child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: _buildBody(),
+                    ),
+                  ),
                 ),
               ),
             ),
           ),
-        ),
+          Positioned.fill(
+            child: IgnorePointer(
+              child: CustomPaint(painter: FilmGrainPainter(opacity: 0.08)),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1026,7 +1052,7 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
                             decoration: BoxDecoration(
                               color: Colors.white,
                               borderRadius: BorderRadius.circular(18),
-                              border: Border.all(color: Colors.indigo.shade100),
+                              border: Border.all(color: const Color(0xFF2A2A2A)),
                             ),
                           ),
                         ),
@@ -1059,7 +1085,7 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
                         padding: const EdgeInsets.all(20),
                         decoration: BoxDecoration(
                           gradient: LinearGradient(
-                            colors: [Colors.indigo.shade400, Colors.purple.shade300],
+                            colors: const [_inkBlack, Color(0xFF2A2A2A), _warmCreme],
                             begin: Alignment.topLeft,
                             end: Alignment.bottomRight,
                           ),
@@ -1077,7 +1103,7 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
                             prompts[promptIndex].text,
                             textAlign: TextAlign.center,
                             style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                  color: Colors.white,
+                                  color: _creme,
                                   fontWeight: FontWeight.w600,
                                 ),
                           ),
@@ -1209,6 +1235,38 @@ class ParticleSplashPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant ParticleSplashPainter oldDelegate) {
     return oldDelegate.progress != progress;
+  }
+}
+
+class FilmGrainPainter extends CustomPainter {
+  const FilmGrainPainter({required this.opacity});
+
+  final double opacity;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()..style = PaintingStyle.fill;
+    const grainSize = 3.0;
+    final columns = (size.width / grainSize).ceil();
+    final rows = (size.height / grainSize).ceil();
+
+    for (var y = 0; y < rows; y++) {
+      for (var x = 0; x < columns; x++) {
+        final n = sin((x * 12.9898) + (y * 78.233)) * 43758.5453;
+        final normalized = n - n.floorToDouble();
+        final alpha = (normalized * 255 * opacity).toInt().clamp(0, 255);
+        paint.color = Color.fromARGB(alpha, 0, 0, 0);
+        canvas.drawRect(
+          Rect.fromLTWH(x * grainSize, y * grainSize, grainSize, grainSize),
+          paint,
+        );
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant FilmGrainPainter oldDelegate) {
+    return oldDelegate.opacity != opacity;
   }
 }
 
