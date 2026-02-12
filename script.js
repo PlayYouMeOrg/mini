@@ -21,8 +21,6 @@ const palettePool = [
   ["#f94144", "#f9844a", "#f9c74f", "#90be6d", "#577590"]
 ];
 
-const CARD_COUNT = 8;
-
 function randomInt(max) {
   return Math.floor(Math.random() * max);
 }
@@ -48,19 +46,34 @@ function randomGradient() {
   return `${blobs}, linear-gradient(${backgroundTilt}, ${colors.join(",")})`;
 }
 
+function getCardCount() {
+  const width = window.innerWidth;
+
+  if (width < 390) {
+    return 4;
+  }
+
+  if (width < 560) {
+    return 6;
+  }
+
+  return 8;
+}
+
 function renderCards() {
   const grid = document.querySelector("#cardGrid");
   const template = document.querySelector("#cardTemplate");
+  const cardCount = getCardCount();
 
   grid.innerHTML = "";
 
-  for (let index = 0; index < CARD_COUNT; index += 1) {
+  for (let index = 0; index < cardCount; index += 1) {
     const fragment = template.content.cloneNode(true);
     const card = fragment.querySelector(".polaroid-card");
     const artwork = fragment.querySelector(".artwork");
     const text = fragment.querySelector(".card-text");
 
-    const rotation = randomBetween(-2.8, 2.8);
+    const rotation = randomBetween(-2.1, 2.1);
     card.style.transform = `rotate(${rotation.toFixed(2)}deg)`;
 
     const title = prompts[randomInt(prompts.length)];
@@ -71,5 +84,8 @@ function renderCards() {
     grid.appendChild(fragment);
   }
 }
+
+document.querySelector("#shuffleBtn").addEventListener("click", renderCards);
+window.addEventListener("resize", renderCards);
 
 renderCards();

@@ -8,38 +8,45 @@
   box-sizing: border-box;
 }
 
+html,
+body {
+  min-height: 100%;
+}
+
 body {
   margin: 0;
-  min-height: 100vh;
   font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
   color: var(--ink);
   background:
     radial-gradient(circle at 15% 20%, #fff9 0 10%, transparent 50%),
     radial-gradient(circle at 85% 85%, #fff8 0 14%, transparent 45%),
     linear-gradient(140deg, #77756f, #d6d6d4 45%, #727168);
-  padding: 2.5rem 1rem;
+  padding: max(1rem, env(safe-area-inset-top)) 1rem calc(6.5rem + env(safe-area-inset-bottom));
+  overscroll-behavior-y: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 main {
-  max-width: 1200px;
+  max-width: 760px;
   margin: 0 auto;
   text-align: center;
 }
 
 h1 {
-  margin-bottom: 0.4rem;
+  margin: 0 0 0.4rem;
+  font-size: clamp(1.5rem, 5vw, 2rem);
 }
 
 p {
   margin-top: 0;
-  opacity: 0.8;
+  opacity: 0.85;
 }
 
 .card-grid {
-  margin-top: 2rem;
+  margin-top: 1.2rem;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-  gap: 2rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
 }
 
 .polaroid-card {
@@ -49,9 +56,14 @@ p {
   border-radius: 0.5rem;
   box-shadow:
     0 0.1rem 0.4rem #00000017,
-    0 1.25rem 2rem #0000001f;
-  padding: 0.9rem 0.9rem 3.2rem;
-  aspect-ratio: 1 / 1.2;
+    0 1rem 1.4rem #0000001f;
+  padding: 0.7rem 0.7rem 2.4rem;
+  aspect-ratio: 1 / 1.22;
+  transition: transform 160ms ease, box-shadow 160ms ease;
+}
+
+.polaroid-card:active {
+  transform: scale(0.985);
 }
 
 .artwork-wrap {
@@ -66,18 +78,51 @@ p {
 .artwork {
   width: 100%;
   height: 100%;
-  filter: saturate(1.2) brightness(0.65) contrast(1.05) blur(0.2px);
+  filter: saturate(1.2) brightness(0.7) contrast(1.05);
 }
 
 .card-text {
   position: absolute;
-  inset-inline: 0.8rem;
-  bottom: 0.9rem;
+  inset-inline: 0.6rem;
+  bottom: 0.7rem;
   margin: 0;
   text-align: left;
-  font-size: 1.05rem;
+  font-size: 0.92rem;
   font-weight: 600;
-  line-height: 1.25;
+  line-height: 1.2;
   color: #fff;
   text-shadow: 0 0.14rem 0.8rem #000000ab;
+}
+
+.shuffle-btn {
+  position: fixed;
+  z-index: 20;
+  left: 50%;
+  bottom: calc(0.9rem + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  width: min(92vw, 30rem);
+  min-height: 3rem;
+  border: 0;
+  border-radius: 999px;
+  padding: 0.85rem 1rem;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #fff;
+  background: linear-gradient(120deg, #20242f, #455b7c);
+  box-shadow: 0 0.45rem 1rem #0000003d;
+}
+
+.shuffle-btn:active {
+  transform: translateX(-50%) scale(0.985);
+}
+
+@media (min-width: 560px) {
+  .card-grid {
+    gap: 1rem;
+  }
+
+  .card-text {
+    font-size: 1rem;
+  }
 }

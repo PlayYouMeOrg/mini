@@ -2,16 +2,18 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Randomized Polaroid Cards</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <main>
       <h1>Randomized Cards</h1>
-      <p>Refresh to get a fresh composition every time.</p>
+      <p>Tap shuffle for a fresh composition.</p>
       <section class="card-grid" id="cardGrid" aria-label="Color cards"></section>
     </main>
+
+    <button id="shuffleBtn" class="shuffle-btn" type="button" aria-label="Shuffle cards">Shuffle Cards</button>
 
     <template id="cardTemplate">
       <article class="polaroid-card">
