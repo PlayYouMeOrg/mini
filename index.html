@@ -9,8 +9,9 @@
   <body>
     <main>
       <h1>Randomized Cards</h1>
-      <p>Refresh to get a fresh composition every time.</p>
-      <section class="card-grid" id="cardGrid" aria-label="Color cards"></section>
+      <p>Click next to drop a new card into the stack.</p>
+      <section class="card-stack" id="cardStack" aria-live="polite" aria-label="Color card stack"></section>
+      <button class="next-button" id="nextButton" type="button">Next card in 15s</button>
     </main>
 
     <template id="cardTemplate">

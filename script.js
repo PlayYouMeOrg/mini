@@ -21,7 +21,7 @@ const palettePool = [
   ["#f94144", "#f9844a", "#f9c74f", "#90be6d", "#577590"]
 ];
 
-const CARD_COUNT = 8;
+const NEXT_DELAY_SECONDS = 15;
 
 function randomInt(max) {
   return Math.floor(Math.random() * max);
@@ -48,28 +48,77 @@ function randomGradient() {
   return `${blobs}, linear-gradient(${backgroundTilt}, ${colors.join(",")})`;
 }
 
-function renderCards() {
-  const grid = document.querySelector("#cardGrid");
-  const template = document.querySelector("#cardTemplate");
+function createCard(template) {
+  const fragment = template.content.cloneNode(true);
+  const card = fragment.querySelector(".polaroid-card");
+  const artwork = fragment.querySelector(".artwork");
+  const text = fragment.querySelector(".card-text");
 
-  grid.innerHTML = "";
+  const rotation = randomBetween(-2.8, 2.8).toFixed(2);
+  card.style.setProperty("--rotation", `${rotation}deg`);
+  card.style.transform = `rotate(${rotation}deg)`;
 
-  for (let index = 0; index < CARD_COUNT; index += 1) {
-    const fragment = template.content.cloneNode(true);
-    const card = fragment.querySelector(".polaroid-card");
-    const artwork = fragment.querySelector(".artwork");
-    const text = fragment.querySelector(".card-text");
+  const title = prompts[randomInt(prompts.length)];
+  artwork.style.background = randomGradient();
+  artwork.setAttribute("aria-label", title);
+  text.textContent = title;
 
-    const rotation = randomBetween(-2.8, 2.8);
-    card.style.transform = `rotate(${rotation.toFixed(2)}deg)`;
-
-    const title = prompts[randomInt(prompts.length)];
-    artwork.style.background = randomGradient();
-    artwork.setAttribute("aria-label", title);
-    text.textContent = title;
-
-    grid.appendChild(fragment);
-  }
+  return card;
 }
 
-renderCards();
+function initCardStack() {
+  const stack = document.querySelector("#cardStack");
+  const template = document.querySelector("#cardTemplate");
+  const button = document.querySelector("#nextButton");
+  let timer;
+
+  function updateButtonLabel(seconds) {
+    if (seconds <= 0) {
+      button.textContent = "Next card";
+      return;
+    }
+
+    button.textContent = `Next card in ${seconds}s`;
+  }
+
+  function startCooldown() {
+    let remaining = NEXT_DELAY_SECONDS;
+    button.disabled = true;
+    updateButtonLabel(remaining);
+
+    timer = window.setInterval(() => {
+      remaining -= 1;
+      updateButtonLabel(remaining);
+
+      if (remaining <= 0) {
+        window.clearInterval(timer);
+        button.disabled = false;
+      }
+    }, 1000);
+  }
+
+  function dropNextCard() {
+    const oldCard = stack.querySelector(".polaroid-card");
+    const nextCard = createCard(template);
+
+    if (oldCard) {
+      oldCard.classList.add("is-stacked");
+      oldCard.addEventListener("animationend", () => oldCard.remove(), { once: true });
+    }
+
+    nextCard.classList.add("is-dropping");
+    nextCard.addEventListener("animationend", () => {
+      nextCard.classList.remove("is-dropping");
+    }, { once: true });
+
+    stack.appendChild(nextCard);
+    startCooldown();
+  }
+
+  button.addEventListener("click", dropNextCard);
+
+  stack.appendChild(createCard(template));
+  startCooldown();
+}
+
+initCardStack();
