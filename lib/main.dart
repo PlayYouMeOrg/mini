@@ -915,6 +915,7 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
     _flipController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 550),
+      value: 1,
     );
     _flipAnimation = CurvedAnimation(
       parent: _flipController,
