@@ -1,0 +1,83 @@
+:root {
+  --bg: #ebe9e3;
+  --ink: #1f2023;
+  --frame: #f8f8f6;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at 15% 20%, #fff9 0 10%, transparent 50%),
+    radial-gradient(circle at 85% 85%, #fff8 0 14%, transparent 45%),
+    linear-gradient(140deg, #77756f, #d6d6d4 45%, #727168);
+  padding: 2.5rem 1rem;
+}
+
+main {
+  max-width: 1200px;
+  margin: 0 auto;
+  text-align: center;
+}
+
+h1 {
+  margin-bottom: 0.4rem;
+}
+
+p {
+  margin-top: 0;
+  opacity: 0.8;
+}
+
+.card-grid {
+  margin-top: 2rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 2rem;
+}
+
+.polaroid-card {
+  position: relative;
+  background: var(--frame);
+  border: 1px solid #dbdbd8;
+  border-radius: 0.5rem;
+  box-shadow:
+    0 0.1rem 0.4rem #00000017,
+    0 1.25rem 2rem #0000001f;
+  padding: 0.9rem 0.9rem 3.2rem;
+  aspect-ratio: 1 / 1.2;
+}
+
+.artwork-wrap {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: 0.2rem;
+  overflow: hidden;
+  border: 1px solid #111;
+}
+
+.artwork {
+  width: 100%;
+  height: 100%;
+  filter: saturate(1.2) brightness(0.65) contrast(1.05) blur(0.2px);
+}
+
+.card-text {
+  position: absolute;
+  inset-inline: 0.8rem;
+  bottom: 0.9rem;
+  margin: 0;
+  text-align: left;
+  font-size: 1.05rem;
+  font-weight: 600;
+  line-height: 1.25;
+  color: #fff;
+  text-shadow: 0 0.14rem 0.8rem #000000ab;
+}

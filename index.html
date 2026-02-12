@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Randomized Polaroid Cards</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Randomized Cards</h1>
+      <p>Refresh to get a fresh composition every time.</p>
+      <section class="card-grid" id="cardGrid" aria-label="Color cards"></section>
+    </main>
+
+    <template id="cardTemplate">
+      <article class="polaroid-card">
+        <div class="artwork-wrap">
+          <div class="artwork" role="img"></div>
+          <p class="card-text"></p>
+        </div>
+      </article>
+    </template>
+
+    <script src="script.js"></script>
+  </body>
+</html>
