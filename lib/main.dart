@@ -1063,14 +1063,15 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
                       ),
                     AnimatedBuilder(
                       animation: Listenable.merge([_flipAnimation, _throwController]),
-                      builder: (context, child) {
+                      builder: (context, _) {
                         final t = _flipAnimation.value;
                         final tilt = pi * (1 - t);
                         final throwT = _throwCurve.value;
-                        final crumpleScale = 1 - (throwT * 0.3);
+                        final crumpleScale = 1 - (throwT * 0.22);
                         final throwX = throwT * 390;
                         final throwY = -throwT * 240;
                         final throwRotate = throwT * 1.2;
+                        final morphT = ((throwT - 0.12) / 0.88).clamp(0.0, 1.0);
                         return Stack(
                           alignment: Alignment.center,
                           children: [
@@ -1086,28 +1087,43 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
                                 ..rotateZ(_isThrowingCard ? throwRotate : 0.0)
                                 ..scale(_isThrowingCard ? crumpleScale : 1.0)
                                 ..rotateY(tilt),
-                              child: child,
+                              child: Stack(
+                                alignment: Alignment.center,
+                                children: [
+                                  Opacity(
+                                    opacity: 1 - morphT,
+                                    child: _PaperCard(
+                                      width: 300,
+                                      height: 190,
+                                      child: Center(
+                                        child: Padding(
+                                          padding: const EdgeInsets.all(20),
+                                          child: Text(
+                                            prompts[promptIndex].text,
+                                            textAlign: TextAlign.center,
+                                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                                  color: _ink,
+                                                  fontWeight: FontWeight.w700,
+                                                ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  if (_isThrowingCard)
+                                    Opacity(
+                                      opacity: morphT,
+                                      child: _PaperBall(
+                                        diameter: 96 - (throwT * 24),
+                                        rotation: throwT * pi,
+                                      ),
+                                    ),
+                                ],
+                              ),
                             ),
                           ],
                         );
                       },
-                      child: _PaperCard(
-                        width: 300,
-                        height: 190,
-                        child: Center(
-                          child: Padding(
-                            padding: const EdgeInsets.all(20),
-                            child: Text(
-                              prompts[promptIndex].text,
-                              textAlign: TextAlign.center,
-                              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                    color: _ink,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                            ),
-                          ),
-                        ),
-                      ),
                     ),
                   ],
                 ),
@@ -1277,6 +1293,66 @@ class _PaperCard extends StatelessWidget {
       ),
     );
   }
+}
+
+class _PaperBall extends StatelessWidget {
+  const _PaperBall({required this.diameter, required this.rotation});
+
+  final double diameter;
+  final double rotation;
+
+  @override
+  Widget build(BuildContext context) {
+    return Transform.rotate(
+      angle: rotation,
+      child: CustomPaint(
+        size: Size.square(diameter),
+        painter: _PaperBallPainter(),
+      ),
+    );
+  }
+}
+
+class _PaperBallPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final circle = Rect.fromCircle(
+      center: Offset(size.width / 2, size.height / 2),
+      radius: size.width / 2,
+    );
+
+    final paperPaint = Paint()
+      ..shader = const RadialGradient(
+        colors: [Color(0xFFF8F1DF), Color(0xFFE4D5B5)],
+        stops: [0.4, 1],
+      ).createShader(circle)
+      ..style = PaintingStyle.fill;
+
+    canvas.drawOval(circle, paperPaint);
+
+    final wrinkle = Paint()
+      ..color = const Color(0xFF8A7C63).withOpacity(0.4)
+      ..strokeWidth = 1.8
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = size.width / 2;
+    for (var i = 0; i < 9; i++) {
+      final angle = (2 * pi * i) / 9;
+      final p1 = center + Offset(cos(angle), sin(angle)) * (radius * 0.24);
+      final p2 = center + Offset(cos(angle + 0.35), sin(angle + 0.35)) * (radius * 0.8);
+      canvas.drawLine(p1, p2, wrinkle);
+    }
+
+    final shadow = Paint()
+      ..color = Colors.black.withOpacity(0.14)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10);
+    canvas.drawCircle(center + const Offset(0, 3), radius * 0.85, shadow);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 class RippedPaperClipper extends CustomClipper<Path> {
