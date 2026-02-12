@@ -419,20 +419,14 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Center(
-        child: Container(
-          color: const Color(0xFFF4F6FC),
-          child: FittedBox(
-            fit: BoxFit.contain,
-            child: SizedBox(
-              width: 390,
-              height: 844,
-              child: SafeArea(
-                child: Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: _buildBody(),
-                ),
-              ),
+      backgroundColor: const Color(0xFFF4F6FC),
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 390),
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: _buildBody(),
             ),
           ),
         ),
