@@ -1442,22 +1442,31 @@ class FilmGrainPainter extends CustomPainter {
       ).createShader(Rect.fromLTWH(0, 0, size.width, size.height));
     canvas.drawRect(Offset.zero & size, vignette);
 
-    final noise = Paint()..color = _ink.withOpacity(0.045);
+    final noise = Paint()..color = _ink.withOpacity(0.035);
     for (double y = 0; y < size.height; y += 6) {
       final start = (sin(y * 0.2) + 1) * 8;
       canvas.drawLine(Offset(start, y), Offset(size.width - start, y), noise);
     }
 
-    final scratchPaint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 0.8
-      ..color = _ink.withOpacity(0.07 + (sin(frame * pi * 2) + 1) * 0.01);
-    final scratchBaseX = (size.width * 0.78) + (sin(frame * pi * 2.2) * 9);
-    canvas.drawLine(
-      Offset(scratchBaseX, 0),
-      Offset(scratchBaseX + 6, size.height),
-      scratchPaint,
-    );
+    final bloomColors = <Color>[
+      const Color(0xFFEAC5FF),
+      const Color(0xFF9BD7FF),
+      const Color(0xFFFFC6A8),
+      const Color(0xFFC0F4C8),
+    ];
+
+    for (var i = 0; i < bloomColors.length; i++) {
+      final phase = frame * pi * 2 + (i * pi / 2);
+      final center = Offset(
+        size.width * (0.2 + (i * 0.18)) + sin(phase * 0.9) * 20,
+        size.height * (0.25 + (i.isEven ? 0.1 : 0.45)) + cos(phase * 1.1) * 18,
+      );
+      final bloomRadius = 56 + sin(phase * 1.3) * 10;
+      final bloomPaint = Paint()
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 26)
+        ..color = bloomColors[i].withOpacity(0.12);
+      canvas.drawCircle(center, bloomRadius, bloomPaint);
+    }
 
     final dustPaint = Paint()..style = PaintingStyle.fill;
     final dustSeed = (frame * 1000).floor();
