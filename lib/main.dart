@@ -37,9 +37,18 @@ class MiniApp extends StatelessWidget {
           onPrimary: _creme,
         ),
         scaffoldBackgroundColor: _creme,
-        cardTheme: CardThemeData(
+        cardTheme: CardTheme(
           color: const Color(0xFFF7EEDB),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        ),
+        textTheme: ThemeData.light().textTheme.apply(
+              bodyColor: _inkBlack,
+              displayColor: _inkBlack,
+            ),
+        inputDecorationTheme: const InputDecorationTheme(
+          filled: true,
+          fillColor: Color(0x66FFFFFF),
+          border: OutlineInputBorder(),
         ),
       ),
       home: const SessionFlowPage(),
@@ -458,7 +467,12 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
           ),
           Positioned.fill(
             child: IgnorePointer(
-              child: CustomPaint(painter: FilmGrainPainter(opacity: 0.08)),
+              child: CustomPaint(
+                painter: FilmGrainPainter(
+                  opacity: 0.05,
+                  blendMode: BlendMode.softLight,
+                ),
+              ),
             ),
           ),
         ],
@@ -1239,14 +1253,20 @@ class ParticleSplashPainter extends CustomPainter {
 }
 
 class FilmGrainPainter extends CustomPainter {
-  const FilmGrainPainter({required this.opacity});
+  const FilmGrainPainter({
+    required this.opacity,
+    this.blendMode = BlendMode.srcOver,
+  });
 
   final double opacity;
+  final BlendMode blendMode;
 
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()..style = PaintingStyle.fill;
-    const grainSize = 3.0;
+    final paint = Paint()
+      ..style = PaintingStyle.fill
+      ..blendMode = blendMode;
+    const grainSize = 2.0;
     final columns = (size.width / grainSize).ceil();
     final rows = (size.height / grainSize).ceil();
 
@@ -1255,7 +1275,10 @@ class FilmGrainPainter extends CustomPainter {
         final n = sin((x * 12.9898) + (y * 78.233)) * 43758.5453;
         final normalized = n - n.floorToDouble();
         final alpha = (normalized * 255 * opacity).toInt().clamp(0, 255);
-        paint.color = Color.fromARGB(alpha, 0, 0, 0);
+        final isLightGrain = ((x + y) % 3) == 0;
+        paint.color = isLightGrain
+            ? Color.fromARGB(alpha, 255, 255, 255)
+            : Color.fromARGB(alpha, 0, 0, 0);
         canvas.drawRect(
           Rect.fromLTWH(x * grainSize, y * grainSize, grainSize, grainSize),
           paint,
@@ -1266,7 +1289,7 @@ class FilmGrainPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant FilmGrainPainter oldDelegate) {
-    return oldDelegate.opacity != opacity;
+    return oldDelegate.opacity != opacity || oldDelegate.blendMode != blendMode;
   }
 }
 
@@ -1289,7 +1312,6 @@ class SignupPayload {
   final bool acceptedPromoTexts;
   final RoundPreference roundPreference;
 }
-
 
 class PersistedSessionState {
   const PersistedSessionState({
