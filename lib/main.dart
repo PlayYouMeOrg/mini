@@ -274,6 +274,16 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
         (p) => p.id != _player!.id && p.inviteCode.toUpperCase() == normalized,
       );
 
+      final alreadyMatched =
+          _player!.matchedPlayerIds.contains(partner.id) ||
+          partner.matchedPlayerIds.contains(_player!.id);
+      if (alreadyMatched) {
+        setState(() {
+          _error = 'You have already matched with this player in a previous round.';
+        });
+        return;
+      }
+
       await _service.setPairing(
         sessionId: _sessionId!,
         me: _player!,
@@ -1585,6 +1595,7 @@ class PlayerRecord {
     this.currentPromptIndex = 0,
     this.currentRoundPrompts = const <String>[],
     this.askedPromptIds = const <String>[],
+    this.matchedPlayerIds = const <String>[],
     this.seeAgainPlayerIds = const <String>[],
   });
 
@@ -1604,6 +1615,7 @@ class PlayerRecord {
   int currentPromptIndex;
   List<String> currentRoundPrompts;
   List<String> askedPromptIds;
+  List<String> matchedPlayerIds;
   List<String> seeAgainPlayerIds;
 
   List<PromptItem> get currentRoundPromptItems =>
@@ -1626,6 +1638,7 @@ class PlayerRecord {
       'currentPromptIndex': currentPromptIndex,
       'currentRoundPrompts': currentRoundPrompts,
       'askedPromptIds': askedPromptIds,
+      'matchedPlayerIds': matchedPlayerIds,
       'seeAgainPlayerIds': seeAgainPlayerIds,
       'updatedAt': DateTime.now().toIso8601String(),
     };
@@ -1653,6 +1666,10 @@ class PlayerRecord {
           .toList(),
       askedPromptIds: ((json['askedPromptIds'] as List?) ?? const [])
           .map((item) => item.toString())
+          .toList(),
+      matchedPlayerIds: ((json['matchedPlayerIds'] as List?) ?? const [])
+          .map((item) => item.toString())
+          .where((id) => id.isNotEmpty)
           .toList(),
       seeAgainPlayerIds: _parseSeeAgainIds(json),
     );
@@ -1777,9 +1794,17 @@ class RtdbService {
     me.partnerCode = enteredCode;
     me.pairedWith = partner.id;
     me.pairedRound = round;
+    me.matchedPlayerIds = {
+      ...me.matchedPlayerIds,
+      partner.id,
+    }.toList();
 
     partner.pairedWith = me.id;
     partner.pairedRound = round;
+    partner.matchedPlayerIds = {
+      ...partner.matchedPlayerIds,
+      me.id,
+    }.toList();
 
     await savePlayer(sessionId, me);
     await savePlayer(sessionId, partner);
