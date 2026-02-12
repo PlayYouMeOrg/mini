@@ -10,6 +10,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 const _databaseBaseUrl =
     'https://youmedev-feab4-default-rtdb.firebaseio.com';
 const _firestoreProjectId = 'youmedev-feab4';
+const _creme = Color(0xFFF6EEDB);
+const _paper = Color(0xFFF2E5CA);
+const _ink = Color(0xFF16120C);
 
 void main() {
   runApp(const MiniApp());
@@ -23,7 +26,30 @@ class MiniApp extends StatelessWidget {
     return MaterialApp(
       title: 'Session Joiner',
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: _ink,
+          brightness: Brightness.light,
+        ).copyWith(
+          primary: _ink,
+          surface: _paper,
+        ),
+        scaffoldBackgroundColor: _creme,
+        textTheme: Typography.blackMountainView.apply(
+          bodyColor: _ink,
+          displayColor: _ink,
+        ),
+        inputDecorationTheme: InputDecorationTheme(
+          fillColor: _paper,
+          filled: true,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: _ink),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: Color(0xFF524A3A)),
+          ),
+        ),
       ),
       home: const SessionFlowPage(),
     );
@@ -419,16 +445,20 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF4F6FC),
       body: SafeArea(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 390),
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: _buildBody(),
+        child: Stack(
+          children: [
+            const Positioned.fill(child: FilmOverlay()),
+            Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 390),
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: _buildBody(),
+                ),
+              ),
             ),
-          ),
+          ],
         ),
       ),
     );
@@ -880,7 +910,9 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
 
   late final AnimationController _flipController;
   late final Animation<double> _flipAnimation;
-  late final AnimationController _splashController;
+  late final AnimationController _throwController;
+  late final Animation<double> _throwCurve;
+  bool _isThrowingCard = false;
 
   @override
   void didUpdateWidget(covariant GameView oldWidget) {
@@ -895,9 +927,6 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
     if (promptIndex != _animatedPromptIndex) {
       _animatedPromptIndex = promptIndex;
       _flipController
-        ..reset()
-        ..forward();
-      _splashController
         ..reset()
         ..forward();
     }
@@ -915,17 +944,18 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
       parent: _flipController,
       curve: Curves.easeOutBack,
     );
-    _splashController = AnimationController(
+    _throwController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 650),
+      duration: const Duration(milliseconds: 550),
     );
+    _throwCurve = CurvedAnimation(parent: _throwController, curve: Curves.easeInCubic);
   }
 
   @override
   void dispose() {
     _codeCtrl.dispose();
     _flipController.dispose();
-    _splashController.dispose();
+    _throwController.dispose();
     super.dispose();
   }
 
@@ -950,12 +980,22 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
     final nextIndex = player.currentPromptIndex + 1;
     if (nextIndex >= prompts.length) return;
 
-    setState(() => _submitting = true);
+    setState(() {
+      _submitting = true;
+      _isThrowingCard = true;
+    });
+    await _throwController.forward();
     await widget.onDrawPrompt(
       promptIndex: nextIndex,
       partnerId: player.pairedWith!,
     );
-    if (mounted) setState(() => _submitting = false);
+    if (mounted) {
+      _throwController.reset();
+      setState(() {
+        _submitting = false;
+        _isThrowingCard = false;
+      });
+    }
   }
 
   @override
@@ -1014,66 +1054,57 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
                         offset: Offset(0, 10.0 + (i * 8)),
                         child: Transform.rotate(
                           angle: (i + 1) * 0.03,
-                          child: Container(
+                          child: _PaperCard(
                             width: 280,
                             height: 180,
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(18),
-                              border: Border.all(color: Colors.indigo.shade100),
-                            ),
+                            child: const SizedBox.shrink(),
                           ),
                         ),
                       ),
                     AnimatedBuilder(
-                      animation: Listenable.merge([_flipAnimation, _splashController]),
+                      animation: Listenable.merge([_flipAnimation, _throwController]),
                       builder: (context, child) {
                         final t = _flipAnimation.value;
                         final tilt = pi * (1 - t);
+                        final throwT = _throwCurve.value;
+                        final crumpleScale = 1 - (throwT * 0.3);
+                        final throwX = throwT * 390;
+                        final throwY = -throwT * 240;
+                        final throwRotate = throwT * 1.2;
                         return Stack(
                           alignment: Alignment.center,
                           children: [
                             CustomPaint(
                               size: const Size(320, 220),
-                              painter: ParticleSplashPainter(progress: _splashController.value),
+                              painter: ParticleSplashPainter(progress: _throwController.value),
                             ),
                             Transform(
                               alignment: Alignment.center,
                               transform: Matrix4.identity()
                                 ..setEntry(3, 2, 0.001)
+                                ..translate(_isThrowingCard ? throwX : 0.0, _isThrowingCard ? throwY : 0.0)
+                                ..rotateZ(_isThrowingCard ? throwRotate : 0.0)
+                                ..scale(_isThrowingCard ? crumpleScale : 1.0)
                                 ..rotateY(tilt),
                               child: child,
                             ),
                           ],
                         );
                       },
-                      child: Container(
+                      child: _PaperCard(
                         width: 300,
                         height: 190,
-                        padding: const EdgeInsets.all(20),
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [Colors.indigo.shade400, Colors.purple.shade300],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          ),
-                          borderRadius: BorderRadius.circular(20),
-                          boxShadow: const [
-                            BoxShadow(
-                              blurRadius: 18,
-                              offset: Offset(0, 12),
-                              color: Color(0x33000000),
-                            ),
-                          ],
-                        ),
                         child: Center(
-                          child: Text(
-                            prompts[promptIndex].text,
-                            textAlign: TextAlign.center,
-                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w600,
-                                ),
+                          child: Padding(
+                            padding: const EdgeInsets.all(20),
+                            child: Text(
+                              prompts[promptIndex].text,
+                              textAlign: TextAlign.center,
+                              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                    color: _ink,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                            ),
                           ),
                         ),
                       ),
@@ -1194,8 +1225,7 @@ class ParticleSplashPainter extends CustomPainter {
         sin(angle) * (distance + wobble),
       );
       final alpha = ((1 - progress) * 255).toInt().clamp(0, 255);
-      paint.color = Colors.primaries[i % Colors.primaries.length]
-          .withAlpha(alpha);
+      paint.color = (i.isEven ? _ink : const Color(0xFF5C513D)).withAlpha(alpha);
       canvas.drawCircle(center + offset, 2 + (1 - progress) * 4, paint);
     }
   }
@@ -1204,6 +1234,111 @@ class ParticleSplashPainter extends CustomPainter {
   bool shouldRepaint(covariant ParticleSplashPainter oldDelegate) {
     return oldDelegate.progress != progress;
   }
+}
+
+class _PaperCard extends StatelessWidget {
+  const _PaperCard({
+    required this.width,
+    required this.height,
+    required this.child,
+  });
+
+  final double width;
+  final double height;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipPath(
+      clipper: RippedPaperClipper(),
+      child: Container(
+        width: width,
+        height: height,
+        decoration: const BoxDecoration(
+          color: _paper,
+          boxShadow: [
+            BoxShadow(
+              blurRadius: 12,
+              offset: Offset(0, 8),
+              color: Color(0x44000000),
+            ),
+          ],
+        ),
+        child: DecoratedBox(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Color(0xFFF8F0DE), Color(0xFFEBDDC0)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+          ),
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
+class RippedPaperClipper extends CustomClipper<Path> {
+  @override
+  Path getClip(Size size) {
+    final path = Path()..moveTo(0, 8);
+    final rng = Random(7);
+
+    for (double x = 0; x <= size.width; x += 16) {
+      path.lineTo(x, rng.nextDouble() * 7);
+    }
+    for (double y = 0; y <= size.height; y += 14) {
+      path.lineTo(size.width - (rng.nextDouble() * 8), y);
+    }
+    for (double x = size.width; x >= 0; x -= 16) {
+      path.lineTo(x, size.height - (rng.nextDouble() * 8));
+    }
+    for (double y = size.height; y >= 0; y -= 14) {
+      path.lineTo(rng.nextDouble() * 8, y);
+    }
+
+    path.close();
+    return path;
+  }
+
+  @override
+  bool shouldReclip(covariant CustomClipper<Path> oldClipper) => false;
+}
+
+class FilmOverlay extends StatelessWidget {
+  const FilmOverlay({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      painter: FilmGrainPainter(),
+    );
+  }
+}
+
+class FilmGrainPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final vignette = Paint()
+      ..shader = RadialGradient(
+        colors: [
+          Colors.transparent,
+          _ink.withOpacity(0.08),
+        ],
+        stops: const [0.55, 1],
+      ).createShader(Rect.fromLTWH(0, 0, size.width, size.height));
+    canvas.drawRect(Offset.zero & size, vignette);
+
+    final noise = Paint()..color = _ink.withOpacity(0.045);
+    for (double y = 0; y < size.height; y += 6) {
+      final start = (sin(y * 0.2) + 1) * 8;
+      canvas.drawLine(Offset(start, y), Offset(size.width - start, y), noise);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 class SignupPayload {
