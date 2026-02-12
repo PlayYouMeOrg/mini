@@ -1382,27 +1382,63 @@ class RippedPaperClipper extends CustomClipper<Path> {
   bool shouldReclip(covariant CustomClipper<Path> oldClipper) => false;
 }
 
-class FilmOverlay extends StatelessWidget {
+class FilmOverlay extends StatefulWidget {
   const FilmOverlay({super.key});
 
   @override
+  State<FilmOverlay> createState() => _FilmOverlayState();
+}
+
+class _FilmOverlayState extends State<FilmOverlay>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _flickerController;
+
+  @override
+  void initState() {
+    super.initState();
+    _flickerController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1400),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _flickerController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return CustomPaint(
-      painter: FilmGrainPainter(),
+    return IgnorePointer(
+      child: CustomPaint(
+        painter: FilmGrainPainter(animation: _flickerController),
+      ),
     );
   }
 }
 
 class FilmGrainPainter extends CustomPainter {
+  FilmGrainPainter({required this.animation}) : super(repaint: animation);
+
+  final Animation<double> animation;
+
   @override
   void paint(Canvas canvas, Size size) {
+    final frame = animation.value;
+    final flickerStrength = 0.025 + (sin(frame * pi * 4) + 1) * 0.008;
+
+    final exposureFlicker = Paint()
+      ..color = _paper.withOpacity(flickerStrength);
+    canvas.drawRect(Offset.zero & size, exposureFlicker);
+
     final vignette = Paint()
       ..shader = RadialGradient(
         colors: [
           Colors.transparent,
-          _ink.withOpacity(0.08),
+          _ink.withOpacity(0.1),
         ],
-        stops: const [0.55, 1],
+        stops: const [0.5, 1],
       ).createShader(Rect.fromLTWH(0, 0, size.width, size.height));
     canvas.drawRect(Offset.zero & size, vignette);
 
@@ -1411,10 +1447,35 @@ class FilmGrainPainter extends CustomPainter {
       final start = (sin(y * 0.2) + 1) * 8;
       canvas.drawLine(Offset(start, y), Offset(size.width - start, y), noise);
     }
+
+    final scratchPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 0.8
+      ..color = _ink.withOpacity(0.07 + (sin(frame * pi * 2) + 1) * 0.01);
+    final scratchBaseX = (size.width * 0.78) + (sin(frame * pi * 2.2) * 9);
+    canvas.drawLine(
+      Offset(scratchBaseX, 0),
+      Offset(scratchBaseX + 6, size.height),
+      scratchPaint,
+    );
+
+    final dustPaint = Paint()..style = PaintingStyle.fill;
+    final dustSeed = (frame * 1000).floor();
+    final random = Random(dustSeed);
+    for (var i = 0; i < 18; i++) {
+      final x = random.nextDouble() * size.width;
+      final y = random.nextDouble() * size.height;
+      final radius = 0.4 + random.nextDouble() * 1.2;
+      final opacity = 0.04 + random.nextDouble() * 0.06;
+      dustPaint.color = _ink.withOpacity(opacity);
+      canvas.drawCircle(Offset(x, y), radius, dustPaint);
+    }
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  bool shouldRepaint(covariant FilmGrainPainter oldDelegate) {
+    return oldDelegate.animation.value != animation.value;
+  }
 }
 
 class SignupPayload {
