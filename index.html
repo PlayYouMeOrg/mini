@@ -9,11 +9,11 @@
   <body>
     <main>
       <h1>Randomized Cards</h1>
-      <p>Tap shuffle for a fresh composition.</p>
-      <section class="card-grid" id="cardGrid" aria-label="Color cards"></section>
+      <p>A fresh card drops in every 15 seconds.</p>
+      <section class="card-stack" id="cardStack" aria-live="polite" aria-label="Color card stack"></section>
     </main>
 
-    <button id="shuffleBtn" class="shuffle-btn" type="button" aria-label="Shuffle cards">Shuffle Cards</button>
+    <button id="nextBtn" class="shuffle-btn" type="button" aria-label="Show next card">Next Card (15s)</button>
 
     <template id="cardTemplate">
       <article class="polaroid-card">
