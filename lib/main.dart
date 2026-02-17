@@ -4,6 +4,7 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'session_domain.dart';
 
@@ -625,6 +626,9 @@ class _SignupFormState extends State<SignupForm> {
   bool _showTermsValidationError = false;
   bool _submitting = false;
 
+  static final Uri _termsUri =
+      Uri.parse('https://playyoume.com/termsandconditions');
+
   @override
   void dispose() {
     _nameCtrl.dispose();
@@ -657,6 +661,21 @@ class _SignupFormState extends State<SignupForm> {
 
     if (mounted) {
       setState(() => _submitting = false);
+    }
+  }
+
+  Future<void> _openTermsAndConditions() async {
+    final launched = await launchUrl(
+      _termsUri,
+      mode: LaunchMode.externalApplication,
+    );
+
+    if (!launched && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Unable to open Terms and Conditions right now.'),
+        ),
+      );
     }
   }
 
@@ -764,30 +783,54 @@ class _SignupFormState extends State<SignupForm> {
               ),
             ),
             const SizedBox(height: 12),
-            CheckboxListTile(
-              value: _acceptedTermsAndGameTexts,
-              onChanged: (value) {
-                setState(() {
-                  _acceptedTermsAndGameTexts = value ?? false;
-                  if (_acceptedTermsAndGameTexts) {
-                    _showTermsValidationError = false;
-                  }
-                });
-              },
-              controlAffinity: ListTileControlAffinity.leading,
-              contentPadding: EdgeInsets.zero,
-              title: const Text(
-                'I confirm I read the Terms and Conditions '
-                '(Playyoume.com/termsandconditions) and agree to receive '
-                'text messages related to the game.',
-              ),
-              subtitle: _showTermsValidationError && !_acceptedTermsAndGameTexts
-                  ? const Text(
-                      'Required',
-                      style: TextStyle(color: Colors.red),
-                    )
-                  : null,
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Checkbox(
+                  value: _acceptedTermsAndGameTexts,
+                  onChanged: (value) {
+                    setState(() {
+                      _acceptedTermsAndGameTexts = value ?? false;
+                      if (_acceptedTermsAndGameTexts) {
+                        _showTermsValidationError = false;
+                      }
+                    });
+                  },
+                ),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        const Text('I confirm I read the '),
+                        TextButton(
+                          onPressed: _openTermsAndConditions,
+                          style: TextButton.styleFrom(
+                            padding: EdgeInsets.zero,
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            visualDensity: VisualDensity.compact,
+                          ),
+                          child: const Text('Terms and Conditions'),
+                        ),
+                        const Text(
+                          ' and agree to receive text messages related to the game.',
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ),
+            if (_showTermsValidationError && !_acceptedTermsAndGameTexts)
+              const Padding(
+                padding: EdgeInsets.only(left: 12),
+                child: Text(
+                  'Required',
+                  style: TextStyle(color: Colors.red),
+                ),
+              ),
             CheckboxListTile(
               value: _acceptedPromoTexts,
               onChanged: (value) {
