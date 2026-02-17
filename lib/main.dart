@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -1377,25 +1378,34 @@ class _PaperCard extends StatelessWidget {
                       ),
                     ),
                   ),
-                  for (var i = 0; i < 3; i++)
-                    Positioned(
-                      left: (rng.nextDouble() - 0.2) * width * 0.85,
-                      top: (rng.nextDouble() - 0.15) * height * 0.75,
-                      child: Container(
-                        width: width * (0.45 + rng.nextDouble() * 0.4),
-                        height: width * (0.45 + rng.nextDouble() * 0.4),
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: palette[rng.nextInt(palette.length)].withOpacity(0.5),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.16),
-                              blurRadius: 30,
+                  ImageFiltered(
+                    imageFilter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        for (var i = 0; i < 3; i++)
+                          Positioned(
+                            left: (rng.nextDouble() - 0.2) * width * 0.85,
+                            top: (rng.nextDouble() - 0.15) * height * 0.75,
+                            child: Container(
+                              width: width * (0.45 + rng.nextDouble() * 0.4),
+                              height: width * (0.45 + rng.nextDouble() * 0.4),
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color:
+                                    palette[rng.nextInt(palette.length)].withOpacity(0.5),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.16),
+                                    blurRadius: 30,
+                                  ),
+                                ],
+                              ),
                             ),
-                          ],
-                        ),
-                      ),
+                          ),
+                      ],
                     ),
+                  ),
                   Positioned.fill(
                     child: DecoratedBox(
                       decoration: BoxDecoration(
