@@ -11,6 +11,7 @@ import 'session_domain.dart';
 const _creme = Color(0xFFF6EEDB);
 const _paper = Color(0xFFF2E5CA);
 const _ink = Color(0xFF16120C);
+const _gameViewportSize = Size(390, 844);
 
 void main() {
   runApp(const MiniApp());
@@ -448,19 +449,28 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: SafeArea(
-        child: Stack(
-          children: [
-            const Positioned.fill(child: FilmOverlay()),
-            Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 390),
-                child: Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: _buildBody(),
+        child: LayoutBuilder(
+          builder: (context, _) => Stack(
+            children: [
+              const Positioned.fill(child: FilmOverlay()),
+              Positioned.fill(
+                child: Center(
+                  child: FittedBox(
+                    fit: BoxFit.contain,
+                    alignment: Alignment.center,
+                    child: SizedBox(
+                      width: _gameViewportSize.width,
+                      height: _gameViewportSize.height,
+                      child: Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: _buildBody(),
+                      ),
+                    ),
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
