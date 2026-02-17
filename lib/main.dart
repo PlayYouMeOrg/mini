@@ -1184,7 +1184,7 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
                 child: Text('Prompts are syncing. Ask your partner to submit your code too.'),
               ),
           ] else ...[
-            const Text('Enter someone else's 4-character code to pair:'),
+            const Text("Enter someone else's 4-character code to pair:"),
             const SizedBox(height: 8),
             TextField(
               controller: _codeCtrl,
