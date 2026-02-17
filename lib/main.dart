@@ -1103,48 +1103,63 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
                     ?.copyWith(fontWeight: FontWeight.bold)),
           const SizedBox(height: 20),
           if (isPairedThisRound) ...[
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('Paired for this round'),
-                    const SizedBox(height: 6),
-                    Text('Partner player id: ${player?.pairedWith ?? '-'}'),
-                    const SizedBox(height: 6),
-                    Text('Prompt ${prompts.isEmpty ? 0 : (promptIndex + 1)} of ${prompts.length}'),
-                  ],
-                ),
-              ),
-            ),
+            Text('Prompt ${prompts.isEmpty ? 0 : (promptIndex + 1)} of ${prompts.length}'),
             const SizedBox(height: 12),
             if (prompts.isNotEmpty) ...[
               Center(
-                child: AnimatedBuilder(
-                  animation: Listenable.merge([_flipAnimation, _dropController]),
-                  builder: (context, _) {
-                    final tilt = pi * (1 - _flipAnimation.value);
-                    final dropT = _dropCurve.value;
-                    final dropY = -80.0 * (1 - dropT);
-                    final dropScale = 0.95 + (0.05 * dropT);
-                    final dropRotate = (1 - dropT) * 0.08;
-                    return Transform(
-                      alignment: Alignment.center,
-                      transform: Matrix4.identity()
-                        ..setEntry(3, 2, 0.001)
-                        ..translate(0.0, dropY)
-                        ..rotateZ(dropRotate)
-                        ..scale(dropScale)
-                        ..rotateY(tilt),
-                      child: _PaperCard(
-                        width: 240,
-                        height: 330,
-                        prompt: prompts[promptIndex].text,
-                        seed: '${prompts[promptIndex].id}-$promptIndex-${player?.id ?? ''}',
+                child: SizedBox(
+                  width: 290,
+                  height: 370,
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      for (var i = 0; i < (promptIndex > 2 ? 2 : promptIndex); i++)
+                        Positioned(
+                          left: 26 + (i * 8),
+                          top: 10 + (i * 10),
+                          child: Transform.rotate(
+                            angle: -0.045 + (i * 0.03),
+                            child: _PaperCard(
+                              width: 240,
+                              height: 330,
+                              prompt: prompts[promptIndex - i - 1].text,
+                              seed:
+                                  '${prompts[promptIndex - i - 1].id}-${promptIndex - i - 1}-${player?.id ?? ''}',
+                            ),
+                          ),
+                        ),
+                      AnimatedBuilder(
+                        animation: Listenable.merge([_flipAnimation, _dropController]),
+                        builder: (context, _) {
+                          final tilt = pi * (1 - _flipAnimation.value);
+                          final dropT = _dropCurve.value;
+                          final dropY = -80.0 * (1 - dropT);
+                          final dropScale = 0.95 + (0.05 * dropT);
+                          final dropRotate = (1 - dropT) * 0.08;
+                          return Positioned(
+                            left: 18,
+                            top: 0,
+                            child: Transform(
+                              alignment: Alignment.center,
+                              transform: Matrix4.identity()
+                                ..setEntry(3, 2, 0.001)
+                                ..translate(0.0, dropY)
+                                ..rotateZ(dropRotate)
+                                ..scale(dropScale)
+                                ..rotateY(tilt),
+                              child: _PaperCard(
+                                width: 240,
+                                height: 330,
+                                prompt: prompts[promptIndex].text,
+                                seed:
+                                    '${prompts[promptIndex].id}-$promptIndex-${player?.id ?? ''}',
+                              ),
+                            ),
+                          );
+                        },
                       ),
-                    );
-                  },
+                    ],
+                  ),
                 ),
               ),
               const SizedBox(height: 10),
@@ -1330,70 +1345,86 @@ class _PaperCard extends StatelessWidget {
           ),
         ],
       ),
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 42),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(4),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: RadialGradient(
-                  center: Alignment(
-                    -0.6 + rng.nextDouble() * 1.2,
-                    -0.6 + rng.nextDouble() * 1.2,
-                  ),
-                  radius: 1.35,
-                  colors: [palette[0], palette[1], palette[2]],
-                  stops: const [0.1, 0.6, 1],
-                ),
-              ),
-            ),
-            for (var i = 0; i < 3; i++)
-              Positioned(
-                left: (rng.nextDouble() - 0.2) * width * 0.85,
-                top: (rng.nextDouble() - 0.15) * height * 0.75,
-                child: Container(
-                  width: width * (0.45 + rng.nextDouble() * 0.4),
-                  height: width * (0.45 + rng.nextDouble() * 0.4),
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: palette[rng.nextInt(palette.length)].withOpacity(0.5),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.16),
-                        blurRadius: 30,
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 14),
+      child: Column(
+        children: [
+          Expanded(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: RadialGradient(
+                        center: Alignment(
+                          -0.6 + rng.nextDouble() * 1.2,
+                          -0.6 + rng.nextDouble() * 1.2,
+                        ),
+                        radius: 1.35,
+                        colors: [palette[0], palette[1], palette[2]],
+                        stops: const [0.1, 0.6, 1],
                       ),
-                    ],
-                  ),
-                ),
-              ),
-            Positioned.fill(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  border: Border.all(color: const Color(0xAAFFFFFF), width: 1.2),
-                ),
-              ),
-            ),
-            Positioned(
-              left: 12,
-              right: 12,
-              bottom: 12,
-              child: Text(
-                prompt,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: const Color(0xFFF8F8F8),
-                      fontWeight: FontWeight.w700,
-                      shadows: const [
-                        Shadow(color: Color(0xCC000000), blurRadius: 8),
-                      ],
                     ),
+                  ),
+                  for (var i = 0; i < 3; i++)
+                    Positioned(
+                      left: (rng.nextDouble() - 0.2) * width * 0.85,
+                      top: (rng.nextDouble() - 0.15) * height * 0.75,
+                      child: Container(
+                        width: width * (0.45 + rng.nextDouble() * 0.4),
+                        height: width * (0.45 + rng.nextDouble() * 0.4),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: palette[rng.nextInt(palette.length)].withOpacity(0.5),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.16),
+                              blurRadius: 30,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  Positioned.fill(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        border: Border.all(color: const Color(0xAAFFFFFF), width: 1.2),
+                      ),
+                    ),
+                  ),
+                  Center(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Text(
+                        prompt,
+                        maxLines: 4,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                              color: const Color(0xFFF8F8F8),
+                              fontWeight: FontWeight.w700,
+                              shadows: const [
+                                Shadow(color: Color(0xCC000000), blurRadius: 8),
+                              ],
+                            ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
-          ],
-        ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'You Me',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontFamily: 'cursive',
+                  fontStyle: FontStyle.italic,
+                  color: const Color(0xFF312824),
+                ),
+          ),
+        ],
       ),
     );
   }
