@@ -951,12 +951,13 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
   bool _submitting = false;
   int? _seenRound;
   int _animatedPromptIndex = 0;
+  Timer? _nextCardTimer;
+  int _nextCardCooldown = 0;
 
   late final AnimationController _flipController;
   late final Animation<double> _flipAnimation;
-  late final AnimationController _throwController;
-  late final Animation<double> _throwCurve;
-  bool _isThrowingCard = false;
+  late final AnimationController _dropController;
+  late final Animation<double> _dropCurve;
 
   @override
   void didUpdateWidget(covariant GameView oldWidget) {
@@ -965,6 +966,7 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
     if (round != _seenRound) {
       _seenRound = round;
       _animatedPromptIndex = 0;
+      _restartNextCardCooldown();
     }
 
     final promptIndex = widget.player?.currentPromptIndex ?? 0;
@@ -973,6 +975,10 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
       _flipController
         ..reset()
         ..forward();
+      _dropController
+        ..reset()
+        ..forward();
+      _restartNextCardCooldown();
     }
   }
 
@@ -988,19 +994,51 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
       parent: _flipController,
       curve: Curves.easeOutBack,
     );
-    _throwController = AnimationController(
+    _dropController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 550),
+      duration: const Duration(milliseconds: 500),
+      value: 1,
     );
-    _throwCurve = CurvedAnimation(parent: _throwController, curve: Curves.easeInCubic);
+    _dropCurve = CurvedAnimation(parent: _dropController, curve: Curves.easeOutCubic);
+    _restartNextCardCooldown();
   }
 
   @override
   void dispose() {
     _codeCtrl.dispose();
+    _nextCardTimer?.cancel();
     _flipController.dispose();
-    _throwController.dispose();
+    _dropController.dispose();
     super.dispose();
+  }
+
+  void _restartNextCardCooldown() {
+    _nextCardTimer?.cancel();
+    final player = widget.player;
+    final prompts = player?.currentRoundPromptItems ?? const <PromptItem>[];
+    final hasNextCard = player != null && player.currentPromptIndex < prompts.length - 1;
+
+    if (!hasNextCard) {
+      if (_nextCardCooldown != 0 && mounted) {
+        setState(() => _nextCardCooldown = 0);
+      }
+      return;
+    }
+
+    setState(() => _nextCardCooldown = 15);
+    _nextCardTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+
+      if (_nextCardCooldown <= 1) {
+        timer.cancel();
+        setState(() => _nextCardCooldown = 0);
+      } else {
+        setState(() => _nextCardCooldown -= 1);
+      }
+    });
   }
 
   Future<void> _submitCode() async {
@@ -1017,28 +1055,22 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
     if (player == null ||
         player.pairedWith == null ||
         currentRound == null ||
-        prompts.isEmpty) {
+        prompts.isEmpty ||
+        _nextCardCooldown > 0) {
       return;
     }
 
     final nextIndex = player.currentPromptIndex + 1;
     if (nextIndex >= prompts.length) return;
 
-    setState(() {
-      _submitting = true;
-      _isThrowingCard = true;
-    });
-    await _throwController.forward();
+    setState(() => _submitting = true);
+    _restartNextCardCooldown();
     await widget.onDrawPrompt(
       promptIndex: nextIndex,
       partnerId: player.pairedWith!,
     );
     if (mounted) {
-      _throwController.reset();
-      setState(() {
-        _submitting = false;
-        _isThrowingCard = false;
-      });
+      setState(() => _submitting = false);
     }
   }
 
@@ -1086,97 +1118,63 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
                 ),
               ),
             ),
+            const SizedBox(height: 12),
             if (prompts.isNotEmpty) ...[
-              const SizedBox(height: 10),
-              SizedBox(
-                height: 240,
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    for (var i = 0; i < max(0, prompts.length - promptIndex - 1).clamp(0, 3); i++)
-                      Transform.translate(
-                        offset: Offset(0, 10.0 + (i * 8)),
-                        child: Transform.rotate(
-                          angle: (i + 1) * 0.03,
-                          child: _PaperCard(
-                            width: 280,
-                            height: 180,
-                            child: const SizedBox.shrink(),
+              Center(
+                child: AnimatedBuilder(
+                  animation: Listenable.merge([_flipAnimation, _dropController]),
+                  builder: (context, _) {
+                    final tilt = pi * (1 - _flipAnimation.value);
+                    final dropT = _dropCurve.value;
+                    final dropY = -80.0 * (1 - dropT);
+                    final dropScale = 0.95 + (0.05 * dropT);
+                    final dropRotate = (1 - dropT) * 0.08;
+                    return Transform(
+                      alignment: Alignment.center,
+                      transform: Matrix4.identity()
+                        ..setEntry(3, 2, 0.001)
+                        ..translate(0.0, dropY)
+                        ..rotateZ(dropRotate)
+                        ..scale(dropScale)
+                        ..rotateY(tilt),
+                      child: _PaperCard(
+                        width: 300,
+                        height: 190,
+                        child: Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(20),
+                            child: Text(
+                              prompts[promptIndex].text,
+                              textAlign: TextAlign.center,
+                              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                    color: _ink,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                            ),
                           ),
                         ),
                       ),
-                    AnimatedBuilder(
-                      animation: Listenable.merge([_flipAnimation, _throwController]),
-                      builder: (context, _) {
-                        final t = _flipAnimation.value;
-                        final tilt = pi * (1 - t);
-                        final throwT = _throwCurve.value;
-                        final crumpleScale = 1 - (throwT * 0.22);
-                        final throwX = throwT * 390;
-                        final throwY = -throwT * 240;
-                        final throwRotate = throwT * 1.2;
-                        final morphT = ((throwT - 0.12) / 0.88).clamp(0.0, 1.0);
-                        return Stack(
-                          alignment: Alignment.center,
-                          children: [
-                            CustomPaint(
-                              size: const Size(320, 220),
-                              painter: ParticleSplashPainter(progress: _throwController.value),
-                            ),
-                            Transform(
-                              alignment: Alignment.center,
-                              transform: Matrix4.identity()
-                                ..setEntry(3, 2, 0.001)
-                                ..translate(_isThrowingCard ? throwX : 0.0, _isThrowingCard ? throwY : 0.0)
-                                ..rotateZ(_isThrowingCard ? throwRotate : 0.0)
-                                ..scale(_isThrowingCard ? crumpleScale : 1.0)
-                                ..rotateY(tilt),
-                              child: Stack(
-                                alignment: Alignment.center,
-                                children: [
-                                  Opacity(
-                                    opacity: 1 - morphT,
-                                    child: _PaperCard(
-                                      width: 300,
-                                      height: 190,
-                                      child: Center(
-                                        child: Padding(
-                                          padding: const EdgeInsets.all(20),
-                                          child: Text(
-                                            prompts[promptIndex].text,
-                                            textAlign: TextAlign.center,
-                                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                                  color: _ink,
-                                                  fontWeight: FontWeight.w700,
-                                                ),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                  if (_isThrowingCard)
-                                    Opacity(
-                                      opacity: morphT,
-                                      child: _PaperBall(
-                                        diameter: 96 - (throwT * 24),
-                                        rotation: throwT * pi,
-                                      ),
-                                    ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        );
-                      },
-                    ),
-                  ],
+                    );
+                  },
                 ),
               ),
               const SizedBox(height: 10),
+              if (_nextCardCooldown > 0)
+                Text(
+                  'Next card available in $_nextCardCooldown seconds',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              const SizedBox(height: 10),
               if (promptIndex < prompts.length - 1)
                 FilledButton(
-                  onPressed: _submitting ? null : _drawNextPrompt,
-                  child: Text(_submitting ? 'Drawing...' : 'Draw next card'),
+                  onPressed: (_submitting || _nextCardCooldown > 0) ? null : _drawNextPrompt,
+                  child: Text(
+                    _submitting
+                        ? 'Drawing...'
+                        : _nextCardCooldown > 0
+                            ? 'Draw next card (${_nextCardCooldown}s)'
+                            : 'Draw next card',
+                  ),
                 )
               else
                 const Text('Round complete. Wait for next round to pair with someone new.'),
@@ -1186,7 +1184,7 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
                 child: Text('Prompts are syncing. Ask your partner to submit your code too.'),
               ),
           ] else ...[
-            const Text('Enter someone else\'s 4-character code to pair:'),
+            const Text('Enter someone else's 4-character code to pair:'),
             const SizedBox(height: 8),
             TextField(
               controller: _codeCtrl,
