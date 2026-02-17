@@ -1138,21 +1138,10 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
                         ..scale(dropScale)
                         ..rotateY(tilt),
                       child: _PaperCard(
-                        width: 300,
-                        height: 190,
-                        child: Center(
-                          child: Padding(
-                            padding: const EdgeInsets.all(20),
-                            child: Text(
-                              prompts[promptIndex].text,
-                              textAlign: TextAlign.center,
-                              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                    color: _ink,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                            ),
-                          ),
-                        ),
+                        width: 240,
+                        height: 330,
+                        prompt: prompts[promptIndex].text,
+                        seed: '${prompts[promptIndex].id}-$promptIndex-${player?.id ?? ''}',
                       ),
                     );
                   },
@@ -1298,39 +1287,112 @@ class _PaperCard extends StatelessWidget {
   const _PaperCard({
     required this.width,
     required this.height,
-    required this.child,
+    required this.prompt,
+    required this.seed,
   });
 
   final double width;
   final double height;
-  final Widget child;
+  final String prompt;
+  final String seed;
+
+  int _seedToInt() {
+    var value = 17;
+    for (final codeUnit in seed.codeUnits) {
+      value = (value * 37 + codeUnit) & 0x7fffffff;
+    }
+    return value;
+  }
 
   @override
   Widget build(BuildContext context) {
-    return ClipPath(
-      clipper: RippedPaperClipper(),
-      child: Container(
-        width: width,
-        height: height,
-        decoration: const BoxDecoration(
-          color: _paper,
-          boxShadow: [
-            BoxShadow(
-              blurRadius: 12,
-              offset: Offset(0, 8),
-              color: Color(0x44000000),
+    final rng = Random(_seedToInt());
+    final palettes = <List<Color>>[
+      [const Color(0xFFB5472D), const Color(0xFF0E6B8C), const Color(0xFF2A1D2F)],
+      [const Color(0xFFD18600), const Color(0xFF088D98), const Color(0xFF0D2439)],
+      [const Color(0xFFC8A35F), const Color(0xFF7E0F1C), const Color(0xFF2B1E3A)],
+      [const Color(0xFF007A7A), const Color(0xFFE08600), const Color(0xFF04243A)],
+      [const Color(0xFF1E3A5F), const Color(0xFFCA4A2D), const Color(0xFF222D38)],
+    ];
+    final palette = palettes[rng.nextInt(palettes.length)];
+
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: const Color(0xFFF5F5F3),
+        borderRadius: BorderRadius.circular(9),
+        boxShadow: const [
+          BoxShadow(
+            blurRadius: 18,
+            offset: Offset(0, 10),
+            color: Color(0x33000000),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 42),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(4),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: RadialGradient(
+                  center: Alignment(
+                    -0.6 + rng.nextDouble() * 1.2,
+                    -0.6 + rng.nextDouble() * 1.2,
+                  ),
+                  radius: 1.35,
+                  colors: [palette[0], palette[1], palette[2]],
+                  stops: const [0.1, 0.6, 1],
+                ),
+              ),
+            ),
+            for (var i = 0; i < 3; i++)
+              Positioned(
+                left: (rng.nextDouble() - 0.2) * width * 0.85,
+                top: (rng.nextDouble() - 0.15) * height * 0.75,
+                child: Container(
+                  width: width * (0.45 + rng.nextDouble() * 0.4),
+                  height: width * (0.45 + rng.nextDouble() * 0.4),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: palette[rng.nextInt(palette.length)].withOpacity(0.5),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.16),
+                        blurRadius: 30,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            Positioned.fill(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  border: Border.all(color: const Color(0xAAFFFFFF), width: 1.2),
+                ),
+              ),
+            ),
+            Positioned(
+              left: 12,
+              right: 12,
+              bottom: 12,
+              child: Text(
+                prompt,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: const Color(0xFFF8F8F8),
+                      fontWeight: FontWeight.w700,
+                      shadows: const [
+                        Shadow(color: Color(0xCC000000), blurRadius: 8),
+                      ],
+                    ),
+              ),
             ),
           ],
-        ),
-        child: DecoratedBox(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              colors: [Color(0xFFF8F0DE), Color(0xFFEBDDC0)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-          ),
-          child: child,
         ),
       ),
     );
