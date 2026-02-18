@@ -1031,7 +1031,7 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
     );
     _dropController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1200),
+      duration: const Duration(milliseconds: 6000),
       value: 1,
     );
     _dropCurve = CurvedAnimation(parent: _dropController, curve: Curves.easeOutQuart);
