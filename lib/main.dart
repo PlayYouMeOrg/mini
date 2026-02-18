@@ -9,9 +9,9 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'session_domain.dart';
 
-const _creme = Color(0xFFF6EEDB);
-const _paper = Color(0xFFF2E5CA);
-const _ink = Color(0xFF16120C);
+const _creme = Color(0xFFF5F4EF);
+const _paper = Color(0xFFECEAE2);
+const _ink = Color(0xFF070707);
 const _gameViewportSize = Size(390, 844);
 
 void main() {
@@ -47,7 +47,7 @@ class MiniApp extends StatelessWidget {
           ),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(14),
-            borderSide: const BorderSide(color: Color(0xFF524A3A)),
+            borderSide: const BorderSide(color: Color(0xFF1D1B1B)),
           ),
         ),
       ),
@@ -449,6 +449,7 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      resizeToAvoidBottomInset: false,
       body: SafeArea(
         child: LayoutBuilder(
           builder: (context, _) => Stack(
@@ -561,40 +562,44 @@ class _JoinWithCodeViewState extends State<JoinWithCodeView> {
 
   @override
   Widget build(BuildContext context) {
+    final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
     return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 360),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Join with Code', style: Theme.of(context).textTheme.headlineSmall),
-            const SizedBox(height: 12),
-            const Text('Enter your session code to join the signup flow.'),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _codeCtrl,
-              textInputAction: TextInputAction.done,
-              onSubmitted: (_) => _submit(),
-              decoration: const InputDecoration(
-                labelText: 'Session code',
-                hintText: 'e.g. spring-mixer',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            if (widget.error != null) ...[
+      child: SingleChildScrollView(
+        padding: EdgeInsets.only(bottom: keyboardInset + 24),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 360),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Join with Code', style: Theme.of(context).textTheme.headlineSmall),
               const SizedBox(height: 12),
-              Text(widget.error!, style: const TextStyle(color: Colors.red)),
-            ],
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton(
-                onPressed: _submit,
-                child: const Text('Join session'),
+              const Text('Enter your session code to join the signup flow.'),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _codeCtrl,
+                textInputAction: TextInputAction.done,
+                onSubmitted: (_) => _submit(),
+                decoration: const InputDecoration(
+                  labelText: 'Session code',
+                  hintText: 'e.g. spring-mixer',
+                  border: OutlineInputBorder(),
+                ),
               ),
-            ),
-          ],
+              if (widget.error != null) ...[
+                const SizedBox(height: 12),
+                Text(widget.error!, style: const TextStyle(color: Colors.red)),
+              ],
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: _submit,
+                  child: const Text('Join session'),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -692,7 +697,9 @@ class _SignupFormState extends State<SignupForm> {
 
   @override
   Widget build(BuildContext context) {
+    final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
     return SingleChildScrollView(
+      padding: EdgeInsets.only(bottom: keyboardInset + 24),
       child: Form(
         key: _formKey,
         child: Column(
@@ -1087,6 +1094,7 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
+    final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
     final player = widget.player;
     final currentRound = widget.session?.round;
     final isPairedThisRound = player?.pairedWith != null &&
@@ -1098,6 +1106,7 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
         : (player?.currentPromptIndex ?? 0).clamp(0, prompts.length - 1);
 
     return SingleChildScrollView(
+      padding: EdgeInsets.only(bottom: keyboardInset + 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
