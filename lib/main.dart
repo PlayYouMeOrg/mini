@@ -976,27 +976,44 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
   late final Animation<double> _flipAnimation;
   late final AnimationController _dropController;
   late final Animation<double> _dropCurve;
+  late final Animation<double> _dropYOffset;
+  late final Animation<double> _dropXOffset;
+  late final Animation<double> _dropRotation;
+  late final Animation<double> _dropScale;
 
   @override
   void didUpdateWidget(covariant GameView oldWidget) {
     super.didUpdateWidget(oldWidget);
     final round = widget.session?.round;
+    final currentRound = widget.session?.round;
+    final oldRound = oldWidget.session?.round;
+    final isPairedThisRound = widget.player?.pairedWith != null &&
+        widget.player?.pairedRound != null &&
+        widget.player!.pairedRound == currentRound;
+    final wasPairedThisRound = oldWidget.player?.pairedWith != null &&
+        oldWidget.player?.pairedRound != null &&
+        oldWidget.player!.pairedRound == oldRound;
+    final prompts = widget.player?.currentRoundPromptItems ?? const <PromptItem>[];
+    final hadPrompts = (oldWidget.player?.currentRoundPromptItems ?? const <PromptItem>[]).isNotEmpty;
+
     if (round != _seenRound) {
       _seenRound = round;
       _animatedPromptIndex = 0;
       _restartNextCardCooldown();
+      if (isPairedThisRound && prompts.isNotEmpty) {
+        _playCardDropAnimation();
+      }
     }
 
     final promptIndex = widget.player?.currentPromptIndex ?? 0;
     if (promptIndex != _animatedPromptIndex) {
       _animatedPromptIndex = promptIndex;
-      _flipController
-        ..reset()
-        ..forward();
-      _dropController
-        ..reset()
-        ..forward();
+      _playCardDropAnimation();
       _restartNextCardCooldown();
+    }
+
+    if (isPairedThisRound && prompts.isNotEmpty && (!wasPairedThisRound || !hadPrompts)) {
+      _playCardDropAnimation();
     }
   }
 
@@ -1014,11 +1031,59 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
     );
     _dropController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 500),
+      duration: const Duration(milliseconds: 1200),
       value: 1,
     );
-    _dropCurve = CurvedAnimation(parent: _dropController, curve: Curves.easeOutCubic);
+    _dropCurve = CurvedAnimation(parent: _dropController, curve: Curves.easeOutQuart);
+    _dropYOffset = TweenSequence<double>([
+      TweenSequenceItem(
+        tween: Tween(begin: -220.0, end: -8.0)
+            .chain(CurveTween(curve: Curves.easeOutCubic)),
+        weight: 72,
+      ),
+      TweenSequenceItem(
+        tween: Tween(begin: -8.0, end: 0.0)
+            .chain(CurveTween(curve: Curves.easeOut)),
+        weight: 28,
+      ),
+    ]).animate(_dropCurve);
+    _dropXOffset = TweenSequence<double>([
+      TweenSequenceItem(
+        tween: Tween(begin: -34.0, end: 9.0)
+            .chain(CurveTween(curve: Curves.easeOutQuart)),
+        weight: 70,
+      ),
+      TweenSequenceItem(
+        tween: Tween(begin: 9.0, end: 0.0)
+            .chain(CurveTween(curve: Curves.easeInOut)),
+        weight: 30,
+      ),
+    ]).animate(_dropCurve);
+    _dropRotation = TweenSequence<double>([
+      TweenSequenceItem(
+        tween: Tween(begin: 0.22, end: -0.08)
+            .chain(CurveTween(curve: Curves.easeOutQuart)),
+        weight: 75,
+      ),
+      TweenSequenceItem(
+        tween: Tween(begin: -0.08, end: -0.03)
+            .chain(CurveTween(curve: Curves.easeOut)),
+        weight: 25,
+      ),
+    ]).animate(_dropCurve);
+    _dropScale = Tween(begin: 0.94, end: 1.0)
+        .chain(CurveTween(curve: Curves.easeOutCubic))
+        .animate(_dropCurve);
     _restartNextCardCooldown();
+  }
+
+  void _playCardDropAnimation() {
+    _flipController
+      ..reset()
+      ..forward();
+    _dropController
+      ..reset()
+      ..forward();
   }
 
   @override
@@ -1152,20 +1217,16 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
                         animation: Listenable.merge([_flipAnimation, _dropController]),
                         builder: (context, _) {
                           final tilt = pi * (1 - _flipAnimation.value);
-                          final dropT = _dropCurve.value;
-                          final dropY = -80.0 * (1 - dropT);
-                          final dropScale = 0.95 + (0.05 * dropT);
-                          final dropRotate = (1 - dropT) * 0.08;
                           return Positioned(
-                            left: 18,
+                            left: 25,
                             top: 0,
                             child: Transform(
                               alignment: Alignment.center,
                               transform: Matrix4.identity()
                                 ..setEntry(3, 2, 0.001)
-                                ..translate(0.0, dropY)
-                                ..rotateZ(dropRotate)
-                                ..scale(dropScale)
+                                ..translate(_dropXOffset.value, _dropYOffset.value)
+                                ..rotateZ(_dropRotation.value)
+                                ..scale(_dropScale.value)
                                 ..rotateY(tilt),
                               child: _PaperCard(
                                 width: 240,
