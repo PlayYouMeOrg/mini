@@ -444,14 +444,18 @@ class PromptItem {
 }
 
 class PromptCatalog {
-  const PromptCatalog({required this.pools});
+  const PromptCatalog({
+    required this.sets,
+    required this.itemsById,
+  });
 
-  final Map<String, List<PromptItem>> pools;
+  final Map<String, List<PromptItem>> sets;
+  final Map<String, PromptItem> itemsById;
 
-  PromptItem pickUnused(String poolName, Set<String> usedIds) {
-    final options = pools[poolName] ?? const <PromptItem>[];
+  PromptItem pickUnused(String setId, Set<String> usedIds) {
+    final options = sets[setId] ?? const <PromptItem>[];
     if (options.isEmpty) {
-      throw StateError('Prompt pool $poolName is empty.');
+      throw StateError('Prompt set $setId is empty.');
     }
 
     final unused = options.where((item) => !usedIds.contains(item.id)).toList();
@@ -459,33 +463,45 @@ class PromptCatalog {
     final index = Random.secure().nextInt(source.length);
     return source[index];
   }
+
+  List<PromptItem> resolveIds(List<String> promptIds) {
+    return promptIds
+        .map((id) => itemsById[id] ?? PromptItem(id: id, text: id))
+        .toList();
+  }
 }
 
 class PromptCatalogService {
   Future<PromptCatalog> loadDatingCatalog() async {
     final raw = await rootBundle.loadString('Prompts/Dating/prompt_set_x.json');
     final decoded = jsonDecode(raw) as Map<String, dynamic>;
-    final dating = decoded['dating'] as Map<String, dynamic>?;
-    if (dating == null) {
-      throw StateError('Missing dating prompt bucket in prompt_set_x.json');
+    final mini = decoded['mini'] as Map<String, dynamic>?;
+    final prompts = mini?['prompts'] as Map<String, dynamic>?;
+    if (prompts == null) {
+      throw StateError('Missing mini.prompts in prompt_set_x.json');
     }
 
-    final pools = dating.map(
-      (key, value) => MapEntry(
-        key,
-        ((value as List?) ?? const [])
-            .map(
-              (item) => PromptItem(
-                id: (item['id'] ?? '').toString(),
-                text: (item['text'] ?? '').toString(),
-              ),
-            )
-            .where((item) => item.id.isNotEmpty && item.text.isNotEmpty)
-            .toList(),
-      ),
-    );
+    final sets = <String, List<PromptItem>>{};
+    final itemsById = <String, PromptItem>{};
 
-    return PromptCatalog(pools: pools);
+    prompts.forEach((setId, value) {
+      final promptSet = value as Map<String, dynamic>?;
+      final promptItems = ((promptSet?['prompts'] as List?) ?? const [])
+          .map(
+            (item) => PromptItem(
+              id: (item['id'] ?? '').toString(),
+              text: (item['text'] ?? '').toString(),
+            ),
+          )
+          .where((item) => item.id.isNotEmpty && item.text.isNotEmpty)
+          .toList();
+      sets[setId] = promptItems;
+      for (final item in promptItems) {
+        itemsById[item.id] = item;
+      }
+    });
+
+    return PromptCatalog(sets: sets, itemsById: itemsById);
   }
 }
 
