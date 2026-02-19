@@ -19,8 +19,6 @@ class SignupPayload {
   const SignupPayload({
     required this.name,
     required this.phone,
-    required this.gender,
-    required this.sexualPreference,
     required this.acceptedTermsAndGameTexts,
     required this.acceptedPromoTexts,
     required this.roundPreference,
@@ -28,8 +26,6 @@ class SignupPayload {
 
   final String name;
   final String phone;
-  final String gender;
-  final String sexualPreference;
   final bool acceptedTermsAndGameTexts;
   final bool acceptedPromoTexts;
   final RoundPreference roundPreference;
