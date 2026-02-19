@@ -167,15 +167,15 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
 
     try {
       final session = await _service.fetchSession(_sessionId!);
-      final playerId = generateId();
+      final playerId = _phoneAuthPlayerId(payload.phone);
       final inviteCode = generateInviteCode();
       final signup = payload;
       final player = PlayerRecord(
         id: playerId,
         name: signup.name,
         phone: signup.phone,
-        gender: signup.gender,
-        sexualPreference: signup.sexualPreference,
+        gender: '',
+        sexualPreference: '',
         acceptedTermsAndGameTexts: signup.acceptedTermsAndGameTexts,
         acceptedPromoTexts: signup.acceptedPromoTexts,
         roundPreference: signup.roundPreference,
@@ -207,6 +207,12 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
         _error = 'Unable to sign up: $e';
       });
     }
+  }
+
+  String _phoneAuthPlayerId(String phone) {
+    final digitsOnly = phone.replaceAll(RegExp(r'\D'), '');
+    if (digitsOnly.isEmpty) return generateId();
+    return 'phone_$digitsOnly';
   }
 
   void _startPolling() {
@@ -626,16 +632,6 @@ class _SignupFormState extends State<SignupForm> {
   final _formKey = GlobalKey<FormState>();
   final _nameCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
-  static const _genderOptions = ['Woman', 'Man', 'Non-binary', 'Other'];
-  static const _preferenceOptions = [
-    'Women',
-    'Men',
-    'Everyone',
-    'Prefer not to say',
-  ];
-
-  String? _selectedGender;
-  String? _selectedPreference;
   RoundPreference _roundPreference = RoundPreference.openingUp;
   bool _acceptedTermsAndGameTexts = false;
   bool _acceptedPromoTexts = false;
@@ -667,8 +663,6 @@ class _SignupFormState extends State<SignupForm> {
       SignupPayload(
         name: _nameCtrl.text.trim(),
         phone: _phoneCtrl.text.trim(),
-        gender: _selectedGender!.trim(),
-        sexualPreference: _selectedPreference!.trim(),
         acceptedTermsAndGameTexts: _acceptedTermsAndGameTexts,
         acceptedPromoTexts: _acceptedPromoTexts,
         roundPreference: _roundPreference,
@@ -712,51 +706,7 @@ class _SignupFormState extends State<SignupForm> {
             const SizedBox(height: 24),
             _input(_nameCtrl, 'Name'),
             const SizedBox(height: 12),
-            _input(_phoneCtrl, 'Phone number', phone: true),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              value: _selectedGender,
-              items: _genderOptions
-                  .map(
-                    (option) => DropdownMenuItem<String>(
-                      value: option,
-                      child: Text(option),
-                    ),
-                  )
-                  .toList(),
-              onChanged: (value) {
-                setState(() {
-                  _selectedGender = value;
-                });
-              },
-              validator: (value) => value == null ? 'Required' : null,
-              decoration: const InputDecoration(
-                labelText: 'Gender',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              value: _selectedPreference,
-              items: _preferenceOptions
-                  .map(
-                    (option) => DropdownMenuItem<String>(
-                      value: option,
-                      child: Text(option),
-                    ),
-                  )
-                  .toList(),
-              onChanged: (value) {
-                setState(() {
-                  _selectedPreference = value;
-                });
-              },
-              validator: (value) => value == null ? 'Required' : null,
-              decoration: const InputDecoration(
-                labelText: 'Sexual preference',
-                border: OutlineInputBorder(),
-              ),
-            ),
+            _input(_phoneCtrl, 'Phone number (authentication)', phone: true),
             const SizedBox(height: 12),
             InputDecorator(
               decoration: const InputDecoration(
