@@ -410,24 +410,24 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
     List<PromptItem> prompts;
     if (partnerRefreshed.currentPromptRound == round &&
         partnerRefreshed.currentRoundPrompts.length == 3) {
-      prompts = partnerRefreshed.currentRoundPromptItems;
+      prompts = catalog.resolveIds(partnerRefreshed.currentRoundPrompts);
     } else {
       final seenIds = {
         ...me.askedPromptIds,
         ...partnerRefreshed.askedPromptIds,
       };
-      final pool1 = catalog.pickUnused('promptPool1', seenIds);
-      final pool2 = catalog.pickUnused('promptPool2', seenIds);
-      final finalPool =
+      final icebreaker = catalog.pickUnused('icebreakers_level1', seenIds);
+      final activity = catalog.pickUnused('activities_level1', seenIds);
+      final finalSet =
           me.roundPreference == RoundPreference.openingUp &&
                   partnerRefreshed.roundPreference == RoundPreference.openingUp
-              ? 'promptPool3'
-              : 'promptPool4';
-      final pool3Or4 = catalog.pickUnused(finalPool, seenIds);
-      prompts = [pool1, pool2, pool3Or4];
+              ? 'dating_questions_level1'
+              : 'icebreakers_level2';
+      final finalPrompt = catalog.pickUnused(finalSet, seenIds);
+      prompts = [icebreaker, activity, finalPrompt];
     }
 
-    final promptStorageValues = prompts.map((prompt) => prompt.toStorage()).toList();
+    final promptStorageValues = prompts.map((prompt) => prompt.id).toList();
 
     final mergedHistory = {
       ...me.askedPromptIds,
@@ -512,6 +512,7 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
           error: _error,
           onSubmitCode: _submitPartnerCode,
           onDrawPrompt: _syncPromptDraw,
+          promptCatalog: _promptCatalog,
         );
       case Stage.ended:
         return EndedView(players: _mutualSeeAgainPlayers);
@@ -898,6 +899,7 @@ class GameView extends StatefulWidget {
     required this.session,
     required this.onSubmitCode,
     required this.onDrawPrompt,
+    required this.promptCatalog,
     this.error,
   });
 
@@ -908,6 +910,7 @@ class GameView extends StatefulWidget {
     required int promptIndex,
     required String partnerId,
   }) onDrawPrompt;
+  final PromptCatalog? promptCatalog;
   final String? error;
 
   @override
@@ -943,8 +946,8 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
     final wasPairedThisRound = oldWidget.player?.pairedWith != null &&
         oldWidget.player?.pairedRound != null &&
         oldWidget.player!.pairedRound == oldRound;
-    final prompts = widget.player?.currentRoundPromptItems ?? const <PromptItem>[];
-    final hadPrompts = (oldWidget.player?.currentRoundPromptItems ?? const <PromptItem>[]).isNotEmpty;
+    final prompts = widget.promptCatalog?.resolveIds(widget.player?.currentRoundPrompts ?? const <String>[]) ?? const <PromptItem>[];
+    final hadPrompts = (oldWidget.promptCatalog?.resolveIds(oldWidget.player?.currentRoundPrompts ?? const <String>[]) ?? const <PromptItem>[]).isNotEmpty;
 
     if (round != _seenRound) {
       _seenRound = round;
@@ -1048,7 +1051,7 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
   void _restartNextCardCooldown() {
     _nextCardTimer?.cancel();
     final player = widget.player;
-    final prompts = player?.currentRoundPromptItems ?? const <PromptItem>[];
+    final prompts = widget.promptCatalog?.resolveIds(player?.currentRoundPrompts ?? const <String>[]) ?? const <PromptItem>[];
     final hasNextCard = player != null && player.currentPromptIndex < prompts.length - 1;
 
     if (!hasNextCard) {
@@ -1083,7 +1086,7 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
 
   Future<void> _drawNextPrompt() async {
     final player = widget.player;
-    final prompts = player?.currentRoundPromptItems ?? const <PromptItem>[];
+    final prompts = widget.promptCatalog?.resolveIds(player?.currentRoundPrompts ?? const <String>[]) ?? const <PromptItem>[];
     final currentRound = widget.session?.round;
     if (player == null ||
         player.pairedWith == null ||
@@ -1115,7 +1118,7 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
     final isPairedThisRound = player?.pairedWith != null &&
         player?.pairedRound != null &&
         player!.pairedRound == currentRound;
-    final prompts = player?.currentRoundPromptItems ?? const <PromptItem>[];
+    final prompts = widget.promptCatalog?.resolveIds(player?.currentRoundPrompts ?? const <String>[]) ?? const <PromptItem>[];
     final promptIndex = prompts.isEmpty
         ? 0
         : (player?.currentPromptIndex ?? 0).clamp(0, prompts.length - 1);
