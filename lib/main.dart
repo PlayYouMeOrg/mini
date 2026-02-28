@@ -81,10 +81,18 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
   String? _initialSessionStatus;
   PromptCatalog? _promptCatalog;
   List<PlayerRecord> _mutualSeeAgainPlayers = const <PlayerRecord>[];
+  bool _uiPreviewMode = false;
+
+  static const _previewPromptSet = [
+    PromptItem(id: 'preview-1', text: 'What is one thing that made you smile this week?'),
+    PromptItem(id: 'preview-2', text: 'If you could teleport anywhere for dinner tonight, where would you go?'),
+    PromptItem(id: 'preview-3', text: 'What kind of vibe helps you feel most yourself on a date?'),
+  ];
 
   @override
   void initState() {
     super.initState();
+    _uiPreviewMode = _queryBool('preview') || _queryBool('uiPreview');
     _sessionId = Uri.base.queryParameters['session'] ??
         Uri.base.queryParameters['sessionId'] ??
         Uri.base.queryParameters['code'];
@@ -92,7 +100,122 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
       _sessionId = null;
     }
 
+    if (_uiPreviewMode) {
+      _enableUiPreview();
+      return;
+    }
+
     unawaited(_restoreSavedSession());
+  }
+
+  bool _queryBool(String key) {
+    final raw = Uri.base.queryParameters[key];
+    if (raw == null) return false;
+    final normalized = raw.trim().toLowerCase();
+    return normalized == '1' || normalized == 'true' || normalized == 'yes';
+  }
+
+  void _enableUiPreview() {
+    final previewPlayer = PlayerRecord(
+      id: 'preview-player',
+      name: 'Preview User',
+      phone: '0000000000',
+      gender: '',
+      sexualPreference: '',
+      acceptedTermsAndGameTexts: true,
+      acceptedPromoTexts: false,
+      roundPreference: RoundPreference.playful,
+      inviteCode: 'UI42',
+      pairedWith: 'preview-partner',
+      pairedRound: 1,
+      currentPromptRound: 1,
+      currentPromptIndex: 0,
+      currentRoundPrompts: _previewPromptSet.map((item) => item.id).toList(),
+      askedPromptIds: _previewPromptSet.map((item) => item.id).toList(),
+      seeAgainPlayerIds: const ['preview-match-1'],
+    );
+
+    setState(() {
+      _sessionId = _sessionId ?? 'ui-preview';
+      _playerId = previewPlayer.id;
+      _player = previewPlayer;
+      _session = SessionRecord(status: 'started', round: 1);
+      _stage = Stage.game;
+      _mutualSeeAgainPlayers = [
+        PlayerRecord(
+          id: 'preview-match-1',
+          name: 'Taylor',
+          phone: '',
+          gender: '',
+          sexualPreference: '',
+          acceptedTermsAndGameTexts: true,
+          acceptedPromoTexts: false,
+          roundPreference: RoundPreference.openingUp,
+          inviteCode: 'TG88',
+        ),
+      ];
+      _promptCatalog = PromptCatalog(
+        sets: {'preview': _previewPromptSet},
+        itemsById: {for (final item in _previewPromptSet) item.id: item},
+      );
+    });
+  }
+
+  void _setPreviewStage(Stage stage) {
+    if (!_uiPreviewMode) return;
+    setState(() {
+      _stage = stage;
+      switch (stage) {
+        case Stage.signup:
+          _session = SessionRecord(status: 'pending', round: 1);
+          _player = null;
+          _error = null;
+          break;
+        case Stage.waiting:
+          _session = SessionRecord(status: 'waiting', round: 1);
+          _player ??= _buildPreviewPlayer();
+          _player!
+            ..pairedWith = null
+            ..pairedRound = null
+            ..currentPromptIndex = 0
+            ..currentPromptRound = 1
+            ..currentRoundPrompts = _previewPromptSet.map((item) => item.id).toList();
+          _error = null;
+          break;
+        case Stage.game:
+          _session = SessionRecord(status: 'started', round: 1);
+          _player ??= _buildPreviewPlayer();
+          _player!
+            ..pairedWith = 'preview-partner'
+            ..pairedRound = 1
+            ..currentPromptRound = 1
+            ..currentPromptIndex = 0
+            ..currentRoundPrompts = _previewPromptSet.map((item) => item.id).toList();
+          _error = null;
+          break;
+        case Stage.ended:
+          _session = SessionRecord(status: 'ended', round: 1);
+          _error = null;
+          break;
+      }
+    });
+  }
+
+  PlayerRecord _buildPreviewPlayer() {
+    return PlayerRecord(
+      id: 'preview-player',
+      name: 'Preview User',
+      phone: '0000000000',
+      gender: '',
+      sexualPreference: '',
+      acceptedTermsAndGameTexts: true,
+      acceptedPromoTexts: false,
+      roundPreference: RoundPreference.playful,
+      inviteCode: 'UI42',
+      currentPromptRound: 1,
+      currentRoundPrompts: _previewPromptSet.map((item) => item.id).toList(),
+      askedPromptIds: _previewPromptSet.map((item) => item.id).toList(),
+    );
   }
 
   Future<void> _restoreSavedSession() async {
@@ -159,6 +282,25 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
   }
 
   Future<void> _handleSignup(SignupPayload payload) async {
+    if (_uiPreviewMode) {
+      setState(() {
+        _player = PlayerRecord(
+          id: 'preview-player',
+          name: payload.name,
+          phone: payload.phone,
+          gender: '',
+          sexualPreference: '',
+          acceptedTermsAndGameTexts: payload.acceptedTermsAndGameTexts,
+          acceptedPromoTexts: payload.acceptedPromoTexts,
+          roundPreference: payload.roundPreference,
+          inviteCode: 'UI42',
+        );
+        _stage = Stage.waiting;
+        _session = SessionRecord(status: 'waiting', round: 1);
+      });
+      return;
+    }
+
     if (_sessionId == null) return;
 
     setState(() {
@@ -216,6 +358,7 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
   }
 
   void _startPolling() {
+    if (_uiPreviewMode) return;
     _poller?.cancel();
     _poller = Timer.periodic(const Duration(seconds: 2), (_) async {
       if (_sessionId == null || _playerId == null || !mounted) return;
@@ -264,6 +407,17 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
   }
 
   Future<void> _submitPartnerCode(String code) async {
+    if (_uiPreviewMode) {
+      setState(() {
+        _player
+          ?..pairedWith = 'preview-partner'
+          ..pairedRound = _session?.round ?? 1
+          ..partnerCode = code.trim().toUpperCase();
+        _error = null;
+      });
+      return;
+    }
+
     if (_sessionId == null || _player == null || _session == null) return;
 
     try {
@@ -477,6 +631,7 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
                   ),
                 ),
               ),
+              _buildPreviewToolbar(),
             ],
           ),
         ),
@@ -523,6 +678,14 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
     required int promptIndex,
     required String partnerId,
   }) async {
+    if (_uiPreviewMode) {
+      if (_player == null) return;
+      setState(() {
+        _player!.currentPromptIndex = promptIndex;
+      });
+      return;
+    }
+
     if (_sessionId == null || _player == null) return;
 
     await _service.syncPromptIndexForPair(
@@ -537,6 +700,55 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
     setState(() {
       _player = refreshed;
     });
+  }
+
+  Widget _buildPreviewToolbar() {
+    if (!_uiPreviewMode) return const SizedBox.shrink();
+
+    return Positioned(
+      right: 12,
+      bottom: 12,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: Colors.black.withOpacity(0.7),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          child: Wrap(
+            spacing: 6,
+            children: [
+              _PreviewStageButton(label: 'Signup', onTap: () => _setPreviewStage(Stage.signup)),
+              _PreviewStageButton(label: 'Waiting', onTap: () => _setPreviewStage(Stage.waiting)),
+              _PreviewStageButton(label: 'Game', onTap: () => _setPreviewStage(Stage.game)),
+              _PreviewStageButton(label: 'Ended', onTap: () => _setPreviewStage(Stage.ended)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PreviewStageButton extends StatelessWidget {
+  const _PreviewStageButton({required this.label, required this.onTap});
+
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton(
+      onPressed: onTap,
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        minimumSize: Size.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        foregroundColor: Colors.white,
+        side: const BorderSide(color: Colors.white30),
+      ),
+      child: Text(label),
+    );
   }
 }
 
