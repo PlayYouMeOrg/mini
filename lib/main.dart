@@ -3,7 +3,10 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:ui' as ui;
 
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -14,8 +17,60 @@ const _paper = Color(0xFFECEAE2);
 const _ink = Color(0xFF070707);
 const _gameViewportSize = Size(390, 844);
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await AppFirebase.initialize();
   runApp(const MiniApp());
+}
+
+class AppFirebase {
+  static bool isConfigured = false;
+
+  static Future<void> initialize() async {
+    try {
+      final hasDefault = Firebase.apps.isNotEmpty;
+      if (!hasDefault) {
+        final options = _webOptionsFromDefines();
+        if (kIsWeb && options == null) {
+          isConfigured = false;
+          return;
+        }
+        await Firebase.initializeApp(options: options);
+      }
+      isConfigured = true;
+    } catch (_) {
+      isConfigured = false;
+    }
+  }
+
+  static FirebaseOptions? _webOptionsFromDefines() {
+    const apiKey = String.fromEnvironment('FIREBASE_API_KEY');
+    const appId = String.fromEnvironment('FIREBASE_APP_ID');
+    const senderId = String.fromEnvironment('FIREBASE_MESSAGING_SENDER_ID');
+    const projectId = String.fromEnvironment('FIREBASE_PROJECT_ID');
+
+    if (apiKey.isEmpty || appId.isEmpty || senderId.isEmpty || projectId.isEmpty) {
+      return null;
+    }
+
+    const authDomain = String.fromEnvironment(
+      'FIREBASE_AUTH_DOMAIN',
+      defaultValue: 'youmedev-feab4.firebaseapp.com',
+    );
+    const storageBucket = String.fromEnvironment(
+      'FIREBASE_STORAGE_BUCKET',
+      defaultValue: 'youmedev-feab4.appspot.com',
+    );
+
+    return const FirebaseOptions(
+      apiKey: apiKey,
+      appId: appId,
+      messagingSenderId: senderId,
+      projectId: projectId,
+      authDomain: authDomain,
+      storageBucket: storageBucket,
+    );
+  }
 }
 
 class MiniApp extends StatelessWidget {
@@ -56,7 +111,7 @@ class MiniApp extends StatelessWidget {
   }
 }
 
-enum Stage { signup, waiting, game, ended }
+enum Stage { signup, waiting, matching, game, ended }
 
 class SessionFlowPage extends StatefulWidget {
   const SessionFlowPage({super.key});
@@ -140,7 +195,7 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
       _playerId = previewPlayer.id;
       _player = previewPlayer;
       _session = SessionRecord(status: 'started', round: 1);
-      _stage = Stage.game;
+      _stage = Stage.matching;
       _mutualSeeAgainPlayers = [
         PlayerRecord(
           id: 'preview-match-1',
@@ -179,6 +234,17 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
             ..pairedRound = null
             ..currentPromptIndex = 0
             ..currentPromptRound = 1
+            ..currentRoundPrompts = _previewPromptSet.map((item) => item.id).toList();
+          _error = null;
+          break;
+        case Stage.matching:
+          _session = SessionRecord(status: 'started', round: 1);
+          _player ??= _buildPreviewPlayer();
+          _player!
+            ..pairedWith = null
+            ..pairedRound = null
+            ..currentPromptRound = 1
+            ..currentPromptIndex = 0
             ..currentRoundPrompts = _previewPromptSet.map((item) => item.id).toList();
           _error = null;
           break;
@@ -309,7 +375,7 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
 
     try {
       final session = await _service.fetchSession(_sessionId!);
-      final playerId = _phoneAuthPlayerId(payload.phone);
+      final playerId = FirebaseAuth.instance.currentUser?.uid ?? _phoneAuthPlayerId(payload.phone);
       final inviteCode = generateInviteCode();
       final signup = payload;
       final player = PlayerRecord(
@@ -372,7 +438,7 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
             (_session?.round != null && session.round != _session!.round);
         final previousPlayer = _player;
 
-        if (roundChanged && _stage == Stage.game) {
+        if (roundChanged && (_stage == Stage.game || _stage == Stage.matching)) {
           final previousPartnerId = previousPlayer?.pairedWith;
           await _service.clearPairing(_sessionId!, _playerId!);
           player.pairedWith = null;
@@ -470,7 +536,12 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
       status?.trim().toLowerCase() == 'ended';
 
   Stage _stageForStatus(String? status) {
-    if (_isSessionLive(status)) return Stage.game;
+    if (_isSessionLive(status)) {
+      final isPairedThisRound = _player?.pairedWith != null &&
+          _player?.pairedRound != null &&
+          _player!.pairedRound == _session?.round;
+      return isPairedThisRound ? Stage.game : Stage.matching;
+    }
     if (_isSessionEnded(status)) return Stage.ended;
     return Stage.waiting;
   }
@@ -660,6 +731,16 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
           session: _session,
           error: _error,
         );
+      case Stage.matching:
+        return GameView(
+          player: _player,
+          session: _session,
+          error: _error,
+          onSubmitCode: _submitPartnerCode,
+          onDrawPrompt: _syncPromptDraw,
+          promptCatalog: _promptCatalog,
+          forceMatchingMode: true,
+        );
       case Stage.game:
         return GameView(
           player: _player,
@@ -720,6 +801,7 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
             children: [
               _PreviewStageButton(label: 'Signup', onTap: () => _setPreviewStage(Stage.signup)),
               _PreviewStageButton(label: 'Waiting', onTap: () => _setPreviewStage(Stage.waiting)),
+              _PreviewStageButton(label: 'Matching', onTap: () => _setPreviewStage(Stage.matching)),
               _PreviewStageButton(label: 'Game', onTap: () => _setPreviewStage(Stage.game)),
               _PreviewStageButton(label: 'Ended', onTap: () => _setPreviewStage(Stage.ended)),
             ],
@@ -845,11 +927,12 @@ class _SignupFormState extends State<SignupForm> {
   final _formKey = GlobalKey<FormState>();
   final _nameCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
-  RoundPreference _roundPreference = RoundPreference.openingUp;
   bool _acceptedTermsAndGameTexts = false;
   bool _acceptedPromoTexts = false;
   bool _showTermsValidationError = false;
   bool _submitting = false;
+  bool _verifyingPhone = false;
+  bool _phoneVerified = false;
 
   static final Uri _termsUri =
       Uri.parse('https://playyoume.com/termsandconditions');
@@ -861,6 +944,62 @@ class _SignupFormState extends State<SignupForm> {
     super.dispose();
   }
 
+  Future<void> _verifyPhoneWithGoogle() async {
+    final phone = _phoneCtrl.text.trim();
+    if (phone.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter your phone number first.')),
+      );
+      return;
+    }
+
+    if (!AppFirebase.isConfigured) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Phone authentication is not configured yet.')),
+      );
+      return;
+    }
+
+    setState(() => _verifyingPhone = true);
+    try {
+      if (kIsWeb) {
+        final confirmation = await FirebaseAuth.instance.signInWithPhoneNumber(phone);
+        final codeCtrl = TextEditingController();
+        final smsCode = await showDialog<String>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Enter verification code'),
+            content: TextField(
+              controller: codeCtrl,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'SMS code'),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+              FilledButton(onPressed: () => Navigator.pop(context, codeCtrl.text.trim()), child: const Text('Verify')),
+            ],
+          ),
+        );
+        if (smsCode == null || smsCode.isEmpty) return;
+        await confirmation.confirm(smsCode);
+      } else {
+        throw UnimplementedError('Phone auth flow is currently implemented for web in this build.');
+      }
+      if (!mounted) return;
+      setState(() => _phoneVerified = true);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Phone number verified.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Phone verification failed: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _verifyingPhone = false);
+    }
+  }
+
   Future<void> _submit() async {
     final isFormValid = _formKey.currentState!.validate();
     if (!_acceptedTermsAndGameTexts) {
@@ -868,7 +1007,12 @@ class _SignupFormState extends State<SignupForm> {
         _showTermsValidationError = true;
       });
     }
-    if (!isFormValid || !_acceptedTermsAndGameTexts) return;
+    if (!_phoneVerified) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please verify your phone number first.')),
+      );
+    }
+    if (!isFormValid || !_acceptedTermsAndGameTexts || !_phoneVerified) return;
 
     setState(() => _submitting = true);
 
@@ -878,7 +1022,7 @@ class _SignupFormState extends State<SignupForm> {
         phone: _phoneCtrl.text.trim(),
         acceptedTermsAndGameTexts: _acceptedTermsAndGameTexts,
         acceptedPromoTexts: _acceptedPromoTexts,
-        roundPreference: _roundPreference,
+        roundPreference: RoundPreference.openingUp,
       ),
     );
 
@@ -919,49 +1063,12 @@ class _SignupFormState extends State<SignupForm> {
             const SizedBox(height: 24),
             _input(_nameCtrl, 'Name'),
             const SizedBox(height: 12),
-            _input(_phoneCtrl, 'Phone number (authentication)', phone: true),
-            const SizedBox(height: 12),
-            InputDecorator(
-              decoration: const InputDecoration(
-                labelText: 'Round style preference',
-                border: OutlineInputBorder(),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          _roundPreference.label,
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                      ),
-                      Switch(
-                        value: _roundPreference == RoundPreference.playful,
-                        onChanged: (isPlayful) {
-                          setState(() {
-                            _roundPreference = isPlayful
-                                ? RoundPreference.playful
-                                : RoundPreference.openingUp;
-                          });
-                        },
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    _roundPreference == RoundPreference.openingUp
-                        ? 'Opening up asks deeper questions when both partners choose it.'
-                        : 'Playful keeps the round light and fun with easier prompts.',
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodySmall
-                        ?.copyWith(color: Theme.of(context).hintColor),
-                  ),
-                ],
-              ),
+            _input(_phoneCtrl, 'Phone number (Google authentication)', phone: true),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: _verifyingPhone ? null : _verifyPhoneWithGoogle,
+              icon: const Icon(Icons.verified_user_outlined),
+              label: Text(_phoneVerified ? 'Phone verified' : 'Verify phone number'),
             ),
             const SizedBox(height: 12),
             Row(
@@ -979,27 +1086,28 @@ class _SignupFormState extends State<SignupForm> {
                   },
                 ),
                 Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.only(top: 12),
-                    child: Wrap(
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        const Text('I confirm I read the '),
-                        TextButton(
-                          onPressed: _openTermsAndConditions,
-                          style: TextButton.styleFrom(
-                            padding: EdgeInsets.zero,
-                            minimumSize: Size.zero,
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            visualDensity: VisualDensity.compact,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const SizedBox(height: 12),
+                      Wrap(
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          const Text('I agree to the '),
+                          GestureDetector(
+                            onTap: _openTermsAndConditions,
+                            child: const Text(
+                              'Terms and Conditions',
+                              style: TextStyle(
+                                decoration: TextDecoration.underline,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
                           ),
-                          child: const Text('Terms and Conditions'),
-                        ),
-                        const Text(
-                          ' and agree to receive text messages related to the game.',
-                        ),
-                      ],
-                    ),
+                          const Text(' and to receive required game texts.'),
+                        ],
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -1060,6 +1168,45 @@ class _SignupFormState extends State<SignupForm> {
   }
 }
 
+class LoveQuote {
+  const LoveQuote({required this.quote, required this.author});
+
+  final String quote;
+  final String author;
+
+  factory LoveQuote.fromJson(Map<String, dynamic> json) {
+    return LoveQuote(
+      quote: (json['quote'] ?? '').toString(),
+      author: (json['author'] ?? '').toString(),
+    );
+  }
+}
+
+class LoveQuotesRepository {
+  static List<LoveQuote>? _cachedQuotes;
+
+  static Future<LoveQuote> pickRandomQuote() async {
+    _cachedQuotes ??= await _loadQuotes();
+    if (_cachedQuotes!.isEmpty) {
+      return const LoveQuote(
+        quote: 'Love looks not with the eyes, but with the mind.',
+        author: 'Billy S. (William Shakespeare)',
+      );
+    }
+    return _cachedQuotes![Random().nextInt(_cachedQuotes!.length)];
+  }
+
+  static Future<List<LoveQuote>> _loadQuotes() async {
+    final raw = await rootBundle.loadString('assets/love_quotes.json');
+    final parsed = jsonDecode(raw);
+    if (parsed is! List) return const <LoveQuote>[];
+    return parsed
+        .whereType<Map>()
+        .map((item) => LoveQuote.fromJson(Map<String, dynamic>.from(item)))
+        .toList();
+  }
+}
+
 class WaitingView extends StatelessWidget {
   const WaitingView({
     super.key,
@@ -1077,7 +1224,7 @@ class WaitingView extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Waiting room', style: Theme.of(context).textTheme.headlineSmall),
+        Text('Waiting Room', style: Theme.of(context).textTheme.headlineSmall),
         const SizedBox(height: 16),
         if (player != null) ...[
           Text('Your code: ${player!.inviteCode}',
@@ -1088,7 +1235,31 @@ class WaitingView extends StatelessWidget {
           const SizedBox(height: 8),
           const Text('Share this code so other players can pair with you.'),
         ],
-        const SizedBox(height: 24),
+        const SizedBox(height: 16),
+        FutureBuilder<LoveQuote>(
+          future: LoveQuotesRepository.pickRandomQuote(),
+          builder: (context, snapshot) {
+            if (!snapshot.hasData) return const SizedBox.shrink();
+            final quote = snapshot.data!;
+            return Card(
+              color: Colors.white,
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Love Note', style: TextStyle(fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 8),
+                    Text('“${quote.quote}”'),
+                    const SizedBox(height: 6),
+                    Text('- ${quote.author}', style: Theme.of(context).textTheme.bodySmall),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+        const SizedBox(height: 16),
         Text('Session status: ${session?.status ?? 'unknown'}'),
         Text('Current round: ${session?.round?.toString() ?? '-'}'),
         const SizedBox(height: 20),
@@ -1113,6 +1284,7 @@ class GameView extends StatefulWidget {
     required this.onDrawPrompt,
     required this.promptCatalog,
     this.error,
+    this.forceMatchingMode = false,
   });
 
   final PlayerRecord? player;
@@ -1124,6 +1296,7 @@ class GameView extends StatefulWidget {
   }) onDrawPrompt;
   final PromptCatalog? promptCatalog;
   final String? error;
+  final bool forceMatchingMode;
 
   @override
   State<GameView> createState() => _GameViewState();
@@ -1327,7 +1500,8 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
     final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
     final player = widget.player;
     final currentRound = widget.session?.round;
-    final isPairedThisRound = player?.pairedWith != null &&
+    final isPairedThisRound = !widget.forceMatchingMode &&
+        player?.pairedWith != null &&
         player?.pairedRound != null &&
         player!.pairedRound == currentRound;
     final prompts = widget.promptCatalog?.resolveIds(player?.currentRoundPrompts ?? const <String>[]) ?? const <PromptItem>[];
@@ -1340,7 +1514,7 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Game Screen', style: Theme.of(context).textTheme.headlineSmall),
+          Text('Round In Progress', style: Theme.of(context).textTheme.headlineSmall),
           const SizedBox(height: 12),
           Text('Round: ${currentRound?.toString() ?? '-'}'),
           Text('Status: ${widget.session?.status ?? '-'}'),
@@ -1476,9 +1650,11 @@ class EndedView extends StatelessWidget {
         const Text('Status: Ended'),
         const SizedBox(height: 20),
         if (players.isEmpty)
-          const Text('Thanks for playing!')
+          const Text('Thanks for playing — keep your heart open, the best connections often arrive unexpectedly.')
         else ...[
           const Text('You both said you would like to see each other again:'),
+          const SizedBox(height: 8),
+          const Text('Take courage into your next conversation — meaningful love starts with one honest moment.'),
           const SizedBox(height: 12),
           ...players.map(
             (player) => Card(

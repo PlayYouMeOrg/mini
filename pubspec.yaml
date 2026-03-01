@@ -8,6 +8,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  firebase_auth: ^5.3.1
+  firebase_core: ^3.6.0
   http: ^1.2.2
   shared_preferences: ^2.3.2
   url_launcher: ^6.3.1
@@ -16,3 +18,4 @@ flutter:
   uses-material-design: true
   assets:
     - Prompts/Dating/prompt_set_x.json
+    - assets/love_quotes.json
