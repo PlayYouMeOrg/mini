@@ -1135,18 +1135,24 @@ class _SignupFormState extends State<SignupForm> {
                   style: TextStyle(color: Colors.red),
                 ),
               ),
-            CheckboxListTile(
-              value: _acceptedPromoTexts,
-              onChanged: (value) {
-                setState(() {
-                  _acceptedPromoTexts = value ?? false;
-                });
-              },
-              controlAffinity: ListTileControlAffinity.leading,
-              contentPadding: EdgeInsets.zero,
-              title: const Text(
-                'Optional: I agree to receive promotional text messages.',
-              ),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Checkbox(
+                  value: _acceptedPromoTexts,
+                  onChanged: (value) {
+                    setState(() {
+                      _acceptedPromoTexts = value ?? false;
+                    });
+                  },
+                ),
+                const Expanded(
+                  child: Padding(
+                    padding: EdgeInsets.only(top: 12),
+                    child: Text('I agree to receive promotional text messages.'),
+                  ),
+                ),
+              ],
             ),
             if (widget.error != null) ...[
               const SizedBox(height: 12),
