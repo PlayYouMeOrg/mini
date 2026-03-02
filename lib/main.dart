@@ -1348,8 +1348,8 @@ class _WaitingViewState extends State<WaitingView>
                       child: _QuotePromptCard(
                         width: 240,
                         height: 330,
-                        quote: hasQuote ? '“${quote!.quote}”' : 'Pulling a love note for you…',
-                        author: hasQuote ? '- ${quote!.author}' : 'Love Note',
+                        quote: hasQuote ? '“${quote!.quote}”' : 'Pulling a quote for you…',
+                        author: hasQuote ? '- ${quote!.author}' : '',
                         seed: hasQuote ? quote!.quote : 'loading-quote',
                       ),
                     );
@@ -1956,40 +1956,36 @@ class _QuotePromptCard extends StatelessWidget {
                   Padding(
                     padding: const EdgeInsets.all(16),
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        Text(
-                          'Love Note',
-                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                                color: const Color(0xFFF8F8F8),
-                                fontWeight: FontWeight.w700,
-                                shadows: const [
-                                  Shadow(color: Color(0xCC000000), blurRadius: 8),
-                                ],
-                              ),
-                        ),
-                        const SizedBox(height: 10),
-                        Expanded(
+                        Flexible(
                           child: Text(
                             quote,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                            textAlign: TextAlign.center,
+                            softWrap: true,
+                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
                                   color: const Color(0xFFF8F8F8),
+                                  fontWeight: FontWeight.w700,
                                   shadows: const [
                                     Shadow(color: Color(0xCC000000), blurRadius: 8),
                                   ],
                                 ),
                           ),
                         ),
-                        Text(
-                          author,
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: const Color(0xFFF8F8F8),
-                                shadows: const [
-                                  Shadow(color: Color(0xCC000000), blurRadius: 8),
-                                ],
-                              ),
-                        ),
+                        if (author.isNotEmpty) ...[
+                          const SizedBox(height: 12),
+                          Text(
+                            author,
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: const Color(0xFFF8F8F8),
+                                  shadows: const [
+                                    Shadow(color: Color(0xCC000000), blurRadius: 8),
+                                  ],
+                                ),
+                          ),
+                        ],
                       ],
                     ),
                   ),
