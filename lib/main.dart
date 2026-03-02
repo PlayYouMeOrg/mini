@@ -2093,7 +2093,10 @@ class _HeartRateBarPainter extends CustomPainter {
       ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 7);
 
     final baselineY = size.height * 0.65;
-    final revealX = size.width * progress;
+    final replacementGap = size.width * 0.14;
+    final sweepX = (size.width + replacementGap) * progress;
+    final newWaveEndX = (sweepX - replacementGap).clamp(0.0, size.width).toDouble();
+    final oldWaveStartX = sweepX.clamp(0.0, size.width).toDouble();
     final path = Path()..moveTo(0, baselineY);
 
     const pulseCount = 2;
@@ -2162,8 +2165,27 @@ class _HeartRateBarPainter extends CustomPainter {
       );
     }
 
-    canvas.drawPath(path, glowPaint);
-    canvas.restore();
+    final oldWavePaint = Paint()
+      ..color = const Color(0x99EA4F6A)
+      ..strokeWidth = 7
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
+
+    final newWavePaint = Paint()
+      ..color = Colors.white
+      ..strokeWidth = 7
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
+
+    drawWave(
+      paintBuilder: () => oldWavePaint,
+      clipRect: Rect.fromLTWH(oldWaveStartX, 0, size.width - oldWaveStartX, size.height),
+    );
+
+    drawWave(
+      paintBuilder: () => newWavePaint,
+      clipRect: Rect.fromLTWH(0, 0, newWaveEndX, size.height),
+    );
   }
 
   @override
