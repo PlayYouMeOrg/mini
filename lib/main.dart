@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
+import 'dart:ui';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -1065,10 +1066,10 @@ class _SignupFormState extends State<SignupForm> {
             const SizedBox(height: 12),
             _input(_phoneCtrl, 'Phone number (Google authentication)', phone: true),
             const SizedBox(height: 10),
-            OutlinedButton.icon(
+            _BlurMixButton(
               onPressed: _verifyingPhone ? null : _verifyPhoneWithGoogle,
-              icon: const Icon(Icons.verified_user_outlined),
-              label: Text(_phoneVerified ? 'Phone verified' : 'Verify phone number'),
+              seed: 'verify-phone-number',
+              label: _phoneVerified ? 'Phone verified' : 'Verify phone number',
             ),
             const SizedBox(height: 12),
             Row(
@@ -1138,14 +1139,10 @@ class _SignupFormState extends State<SignupForm> {
               Text(widget.error!, style: const TextStyle(color: Colors.red)),
             ],
             const SizedBox(height: 18),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton(
-                onPressed: _submitting ? null : _submit,
-                child: Text(
-                  _submitting ? 'Signing up...' : 'Sign up and authenticate',
-                ),
-              ),
+            _BlurMixButton(
+              onPressed: _submitting ? null : _submit,
+              seed: 'signup-and-authenticate',
+              label: _submitting ? 'Signing up...' : 'Sign up and authenticate',
             ),
           ],
         ),
@@ -1995,21 +1992,25 @@ class _ChatGptTextureBackdrop extends StatelessWidget {
       -1 + (rng.nextDouble() * 2),
       -1 + (rng.nextDouble() * 2),
     );
-    final rotation = (rng.nextDouble() * 2 - 1) * (pi / 8);
-    final scale = 2.2 + (rng.nextDouble() * 1.6);
+    final rotation = (rng.nextDouble() * 2 - 1) * (pi / 24);
+    final scale = 5.2 + (rng.nextDouble() * 2.4);
+    final blurSigma = 1.4 + (rng.nextDouble() * 1.4);
 
     return Stack(
       fit: StackFit.expand,
       children: [
         ClipRect(
-          child: Transform.rotate(
-            angle: rotation,
-            child: Transform.scale(
-              scale: scale,
-              child: Image.asset(
-                _chatGptTextureAsset,
-                fit: BoxFit.cover,
-                alignment: alignment,
+          child: ImageFiltered(
+            imageFilter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
+            child: Transform.rotate(
+              angle: rotation,
+              child: Transform.scale(
+                scale: scale,
+                child: Image.asset(
+                  _chatGptTextureAsset,
+                  fit: BoxFit.cover,
+                  alignment: alignment,
+                ),
               ),
             ),
           ),
