@@ -17,7 +17,20 @@ const _creme = Color(0xFFFAFAF7);
 const _paper = Color(0xFFF3F3EF);
 const _ink = Color(0xFF070707);
 const _gameViewportSize = Size(390, 844);
-const _chatGptTextureAsset = 'assets/chat_gpt_texture.png';
+const _chatGptTextureAssets = [
+  'assets/chat_gpt_texture.png',
+  'assets/chat_gpt_texture_alt.png',
+];
+
+String _textureAssetForSeed(String seed) {
+  final rng = Random(seed.hashCode & 0x7fffffff);
+  return _chatGptTextureAssets[rng.nextInt(_chatGptTextureAssets.length)];
+}
+
+Color _toneColorForSeed(String seed) {
+  final rng = Random(seed.hashCode & 0x7fffffff);
+  return HSLColor.fromAHSL(1, rng.nextDouble() * 360, 0.46, 0.52).toColor();
+}
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -2009,11 +2022,17 @@ class _HeartTimerLoader extends StatefulWidget {
 class _HeartTimerLoaderState extends State<_HeartTimerLoader>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
+  late final String _textureAsset;
+  late final Color _toneColor;
   ui.Image? _textureImage;
 
   @override
   void initState() {
     super.initState();
+    final seed =
+        'heart-rate-${DateTime.now().microsecondsSinceEpoch}-${Random().nextInt(1 << 20)}';
+    _textureAsset = _textureAssetForSeed(seed);
+    _toneColor = _toneColorForSeed('$seed-tone');
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1600),
@@ -2022,7 +2041,7 @@ class _HeartTimerLoaderState extends State<_HeartTimerLoader>
   }
 
   Future<void> _loadTextureImage() async {
-    final byteData = await rootBundle.load(_chatGptTextureAsset);
+    final byteData = await rootBundle.load(_textureAsset);
     final codec = await instantiateImageCodec(byteData.buffer.asUint8List());
     final frame = await codec.getNextFrame();
     if (!mounted) return;
@@ -2047,6 +2066,7 @@ class _HeartTimerLoaderState extends State<_HeartTimerLoader>
             painter: _HeartRateBarPainter(
               progress: _controller.value,
               textureImage: _textureImage,
+              toneColor: _toneColor,
             ),
             child: const SizedBox.expand(),
           );
@@ -2057,15 +2077,20 @@ class _HeartTimerLoaderState extends State<_HeartTimerLoader>
 }
 
 class _HeartRateBarPainter extends CustomPainter {
-  const _HeartRateBarPainter({required this.progress, required this.textureImage});
+  const _HeartRateBarPainter({
+    required this.progress,
+    required this.textureImage,
+    required this.toneColor,
+  });
 
   final double progress;
   final ui.Image? textureImage;
+  final Color toneColor;
 
   @override
   void paint(Canvas canvas, Size size) {
     final glowPaint = Paint()
-      ..color = const Color(0x66FF6B86)
+      ..color = toneColor.withOpacity(0.45)
       ..strokeWidth = 13
       ..strokeCap = StrokeCap.round
       ..style = PaintingStyle.stroke
@@ -2111,6 +2136,8 @@ class _HeartRateBarPainter extends CustomPainter {
             Matrix4.identity().scaled(0.35, 0.35).storage,
           )
           ..blendMode = BlendMode.srcIn
+          ..colorFilter =
+              ColorFilter.mode(toneColor.withOpacity(0.55), BlendMode.modulate)
           ..imageFilter = ImageFilter.blur(sigmaX: 2.2, sigmaY: 2.2),
       );
       canvas.restore();
@@ -2118,7 +2145,7 @@ class _HeartRateBarPainter extends CustomPainter {
       canvas.drawPath(
         path,
         Paint()
-          ..color = const Color(0xCCEA4F6A)
+          ..color = toneColor.withOpacity(0.88)
           ..strokeWidth = 7
           ..strokeCap = StrokeCap.round
           ..style = PaintingStyle.stroke,
@@ -2131,7 +2158,9 @@ class _HeartRateBarPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _HeartRateBarPainter oldDelegate) {
-    return oldDelegate.progress != progress || oldDelegate.textureImage != textureImage;
+    return oldDelegate.progress != progress ||
+        oldDelegate.textureImage != textureImage ||
+        oldDelegate.toneColor != toneColor;
   }
 }
 
@@ -2222,6 +2251,8 @@ class _ChatGptTextureBackdrop extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final rng = Random(seed.hashCode & 0x7fffffff);
+    final textureAsset = _textureAssetForSeed(seed);
+    final toneColor = _toneColorForSeed('$seed-tone');
     final alignment = Alignment(
       -1 + (rng.nextDouble() * 2),
       -1 + (rng.nextDouble() * 2),
@@ -2241,7 +2272,7 @@ class _ChatGptTextureBackdrop extends StatelessWidget {
               child: Transform.scale(
                 scale: scale,
                 child: Image.asset(
-                  _chatGptTextureAsset,
+                  textureAsset,
                   fit: BoxFit.cover,
                   alignment: alignment,
                 ),
@@ -2255,8 +2286,14 @@ class _ChatGptTextureBackdrop extends StatelessWidget {
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
               colors: [
-                Colors.black.withOpacity(0.2),
-                Colors.black.withOpacity(0.45),
+                Color.alphaBlend(
+                  toneColor.withOpacity(0.32),
+                  Colors.black.withOpacity(0.2),
+                ),
+                Color.alphaBlend(
+                  toneColor.withOpacity(0.45),
+                  Colors.black.withOpacity(0.45),
+                ),
               ],
             ),
           ),
