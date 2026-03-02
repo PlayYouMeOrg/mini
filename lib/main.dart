@@ -1349,9 +1349,9 @@ class _WaitingViewState extends State<WaitingView>
         const Center(child: _HeartTimerLoader()),
         const SizedBox(height: 12),
         const Center(child: Text('Waiting for the session to start')),
-        if (error != null) ...[
+        if (widget.error != null) ...[
           const SizedBox(height: 12),
-          Text(error!, style: const TextStyle(color: Colors.red)),
+          Text(widget.error!, style: const TextStyle(color: Colors.red)),
         ]
       ],
     );
