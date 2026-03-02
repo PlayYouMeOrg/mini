@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
-import 'dart:ui' as ui;
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -16,6 +15,7 @@ const _creme = Color(0xFFFAFAF7);
 const _paper = Color(0xFFF3F3EF);
 const _ink = Color(0xFF070707);
 const _gameViewportSize = Size(390, 844);
+const _chatGptTextureAsset = 'assets/chat_gpt_texture.png';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -1708,27 +1708,8 @@ class _PaperCard extends StatelessWidget {
   final double height;
   final String prompt;
   final String seed;
-
-  int _seedToInt() {
-    var value = 17;
-    for (final codeUnit in seed.codeUnits) {
-      value = (value * 37 + codeUnit) & 0x7fffffff;
-    }
-    return value;
-  }
-
   @override
   Widget build(BuildContext context) {
-    final rng = Random(_seedToInt());
-    final palettes = <List<Color>>[
-      [const Color(0xFFB5472D), const Color(0xFF0E6B8C), const Color(0xFF2A1D2F)],
-      [const Color(0xFFD18600), const Color(0xFF088D98), const Color(0xFF0D2439)],
-      [const Color(0xFFC8A35F), const Color(0xFF7E0F1C), const Color(0xFF2B1E3A)],
-      [const Color(0xFF007A7A), const Color(0xFFE08600), const Color(0xFF04243A)],
-      [const Color(0xFF1E3A5F), const Color(0xFFCA4A2D), const Color(0xFF222D38)],
-    ];
-    final palette = palettes[rng.nextInt(palettes.length)];
-
     return Container(
       width: width,
       height: height,
@@ -1752,47 +1733,7 @@ class _PaperCard extends StatelessWidget {
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: RadialGradient(
-                        center: Alignment(
-                          -0.6 + rng.nextDouble() * 1.2,
-                          -0.6 + rng.nextDouble() * 1.2,
-                        ),
-                        radius: 1.35,
-                        colors: [palette[0], palette[1], palette[2]],
-                        stops: const [0.1, 0.6, 1],
-                      ),
-                    ),
-                  ),
-                  ImageFiltered(
-                    imageFilter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        for (var i = 0; i < 3; i++)
-                          Positioned(
-                            left: (rng.nextDouble() - 0.2) * width * 0.85,
-                            top: (rng.nextDouble() - 0.15) * height * 0.75,
-                            child: Container(
-                              width: width * (0.45 + rng.nextDouble() * 0.4),
-                              height: width * (0.45 + rng.nextDouble() * 0.4),
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color:
-                                    palette[rng.nextInt(palette.length)].withOpacity(0.5),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withOpacity(0.16),
-                                    blurRadius: 30,
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
+                  _ChatGptTextureBackdrop(seed: seed),
                   Positioned.fill(
                     child: DecoratedBox(
                       decoration: BoxDecoration(
@@ -1869,7 +1810,7 @@ class _QuotePromptCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           AspectRatio(
-            aspectRatio: 1.15,
+            aspectRatio: 220 / 330,
             child: ClipRRect(
               borderRadius: BorderRadius.circular(4),
               child: Stack(
@@ -2038,54 +1979,51 @@ class _BlurMixBackdrop extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    return _ChatGptTextureBackdrop(seed: seed);
+  }
+}
+
+class _ChatGptTextureBackdrop extends StatelessWidget {
+  const _ChatGptTextureBackdrop({required this.seed});
+
+  final String seed;
+
+  @override
+  Widget build(BuildContext context) {
     final rng = Random(seed.hashCode & 0x7fffffff);
-    final paletteBank = <List<Color>>[
-      [const Color(0xFFB5472D), const Color(0xFF0E6B8C), const Color(0xFF2A1D2F)],
-      [const Color(0xFFD18600), const Color(0xFF088D98), const Color(0xFF0D2439)],
-      [const Color(0xFFC8A35F), const Color(0xFF7E0F1C), const Color(0xFF2B1E3A)],
-      [const Color(0xFF007A7A), const Color(0xFFE08600), const Color(0xFF04243A)],
-      [const Color(0xFF1E3A5F), const Color(0xFFCA4A2D), const Color(0xFF222D38)],
-    ];
-    final palette = [...paletteBank[rng.nextInt(paletteBank.length)]]..shuffle(rng);
+    final alignment = Alignment(
+      -1 + (rng.nextDouble() * 2),
+      -1 + (rng.nextDouble() * 2),
+    );
+    final rotation = (rng.nextDouble() * 2 - 1) * (pi / 8);
+    final scale = 2.2 + (rng.nextDouble() * 1.6);
 
     return Stack(
       fit: StackFit.expand,
       children: [
-        DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: RadialGradient(
-              center: Alignment(-0.7 + rng.nextDouble() * 1.1, -0.5 + rng.nextDouble()),
-              radius: 1.5,
-              colors: [palette[0], palette[1], palette[2]],
-              stops: const [0.1, 0.6, 1],
+        ClipRect(
+          child: Transform.rotate(
+            angle: rotation,
+            child: Transform.scale(
+              scale: scale,
+              child: Image.asset(
+                _chatGptTextureAsset,
+                fit: BoxFit.cover,
+                alignment: alignment,
+              ),
             ),
           ),
         ),
-        ImageFiltered(
-          imageFilter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              for (var i = 0; i < 4; i++)
-                Positioned(
-                  left: (rng.nextDouble() - 0.2) * 220,
-                  top: (rng.nextDouble() - 0.15) * 140,
-                  child: Container(
-                    width: 120 + rng.nextDouble() * 70,
-                    height: 120 + rng.nextDouble() * 70,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: palette[rng.nextInt(palette.length)].withOpacity(0.5),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.16),
-                          blurRadius: 30,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-            ],
+        DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Colors.black.withOpacity(0.2),
+                Colors.black.withOpacity(0.45),
+              ],
+            ),
           ),
         ),
       ],

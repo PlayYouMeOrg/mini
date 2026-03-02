@@ -19,3 +19,4 @@ flutter:
   assets:
     - Prompts/Dating/prompt_set_x.json
     - assets/love_quotes.json
+    - assets/chat_gpt_texture.png
