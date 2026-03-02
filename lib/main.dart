@@ -2019,35 +2019,90 @@ class _HeartTimerLoaderState extends State<_HeartTimerLoader>
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 72,
+      width: 260,
       height: 72,
       child: AnimatedBuilder(
         animation: _controller,
         builder: (context, child) {
-          final t = Curves.easeInOut.transform(_controller.value);
-          final heartScale = 0.9 + (0.25 * sin(_controller.value * pi * 2));
-          return Stack(
-            alignment: Alignment.center,
-            children: [
-              CircularProgressIndicator(
-                value: _controller.value,
-                strokeWidth: 4,
-                color: Colors.pink.shade300,
-                backgroundColor: Colors.pink.shade100.withOpacity(0.35),
+          return DecoratedBox(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(20),
+              image: const DecorationImage(
+                image: AssetImage(_chatGptTextureAsset),
+                fit: BoxFit.cover,
               ),
-              Transform.scale(
-                scale: heartScale,
-                child: Icon(
-                  Icons.favorite,
-                  size: 28 + (3 * t),
-                  color: Colors.pink.shade400,
+              border: Border.all(color: const Color(0xDDFFFFFF), width: 1.5),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x33000000),
+                  blurRadius: 10,
+                  offset: Offset(0, 3),
                 ),
+              ],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(20),
+              child: CustomPaint(
+                painter: _HeartRateBarPainter(progress: _controller.value),
+                child: const SizedBox.expand(),
               ),
-            ],
+            ),
           );
         },
       ),
     );
+  }
+}
+
+class _HeartRateBarPainter extends CustomPainter {
+  const _HeartRateBarPainter({required this.progress});
+
+  final double progress;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final barPaint = Paint()
+      ..color = const Color(0xCCEA4F6A)
+      ..strokeWidth = 7
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
+
+    final glowPaint = Paint()
+      ..color = const Color(0x99FF6B86)
+      ..strokeWidth = 13
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 7);
+
+    final baselineY = size.height * 0.72;
+    final cycleWidth = size.width * 0.38;
+    final cycleStart = (size.width + cycleWidth) * progress - cycleWidth;
+
+    final path = Path()
+      ..moveTo(cycleStart, baselineY)
+      ..lineTo(cycleStart + cycleWidth * 0.34, baselineY)
+      ..lineTo(cycleStart + cycleWidth * 0.46, baselineY - size.height * 0.34)
+      ..lineTo(cycleStart + cycleWidth * 0.56, baselineY + size.height * 0.12)
+      ..lineTo(cycleStart + cycleWidth * 0.7, baselineY - size.height * 0.2)
+      ..lineTo(cycleStart + cycleWidth, baselineY);
+
+    canvas.drawPath(path, glowPaint);
+    canvas.drawPath(path, barPaint);
+
+    final trackPaint = Paint()
+      ..color = const Color(0x66FFFFFF)
+      ..strokeWidth = 2.5
+      ..style = PaintingStyle.stroke;
+    canvas.drawLine(
+      Offset(0, baselineY),
+      Offset(size.width, baselineY),
+      trackPaint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _HeartRateBarPainter oldDelegate) {
+    return oldDelegate.progress != progress;
   }
 }
 
