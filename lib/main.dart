@@ -1207,7 +1207,7 @@ class LoveQuotesRepository {
   }
 }
 
-class WaitingView extends StatelessWidget {
+class WaitingView extends StatefulWidget {
   const WaitingView({
     super.key,
     required this.player,
@@ -1218,6 +1218,93 @@ class WaitingView extends StatelessWidget {
   final PlayerRecord? player;
   final SessionRecord? session;
   final String? error;
+
+  @override
+  State<WaitingView> createState() => _WaitingViewState();
+}
+
+class _WaitingViewState extends State<WaitingView>
+    with TickerProviderStateMixin {
+  late final AnimationController _flipController;
+  late final Animation<double> _flipAnimation;
+  late final AnimationController _dropController;
+  late final Animation<double> _dropCurve;
+  late final Animation<double> _dropYOffset;
+  late final Animation<double> _dropXOffset;
+  late final Animation<double> _dropRotation;
+  late final Animation<double> _dropScale;
+
+  @override
+  void initState() {
+    super.initState();
+    _flipController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 550),
+      value: 1,
+    );
+    _flipAnimation = CurvedAnimation(
+      parent: _flipController,
+      curve: Curves.easeOutBack,
+    );
+    _dropController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 6000),
+      value: 1,
+    );
+    _dropCurve = CurvedAnimation(parent: _dropController, curve: Curves.easeOutQuart);
+    _dropYOffset = TweenSequence<double>([
+      TweenSequenceItem(
+        tween: Tween(begin: -220.0, end: -8.0)
+            .chain(CurveTween(curve: Curves.easeOutCubic)),
+        weight: 72,
+      ),
+      TweenSequenceItem(
+        tween: Tween(begin: -8.0, end: 0.0)
+            .chain(CurveTween(curve: Curves.easeOut)),
+        weight: 28,
+      ),
+    ]).animate(_dropCurve);
+    _dropXOffset = TweenSequence<double>([
+      TweenSequenceItem(
+        tween: Tween(begin: -34.0, end: 9.0)
+            .chain(CurveTween(curve: Curves.easeOutQuart)),
+        weight: 70,
+      ),
+      TweenSequenceItem(
+        tween: Tween(begin: 9.0, end: 0.0)
+            .chain(CurveTween(curve: Curves.easeInOut)),
+        weight: 30,
+      ),
+    ]).animate(_dropCurve);
+    _dropRotation = TweenSequence<double>([
+      TweenSequenceItem(
+        tween: Tween(begin: 0.22, end: -0.08)
+            .chain(CurveTween(curve: Curves.easeOutQuart)),
+        weight: 75,
+      ),
+      TweenSequenceItem(
+        tween: Tween(begin: -0.08, end: -0.03)
+            .chain(CurveTween(curve: Curves.easeOut)),
+        weight: 25,
+      ),
+    ]).animate(_dropCurve);
+    _dropScale = Tween(begin: 0.94, end: 1.0)
+        .chain(CurveTween(curve: Curves.easeOutCubic))
+        .animate(_dropCurve);
+    _flipController
+      ..reset()
+      ..forward();
+    _dropController
+      ..reset()
+      ..forward();
+  }
+
+  @override
+  void dispose() {
+    _flipController.dispose();
+    _dropController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1231,10 +1318,33 @@ class WaitingView extends StatelessWidget {
           builder: (context, snapshot) {
             final hasQuote = snapshot.hasData;
             final quote = snapshot.data;
-            return _QuotePromptCard(
-              quote: hasQuote ? '“${quote!.quote}”' : 'Pulling a love note for you…',
-              author: hasQuote ? '- ${quote!.author}' : 'Love Note',
-              seed: hasQuote ? quote!.quote : 'loading-quote',
+            return Center(
+              child: SizedBox(
+                width: 290,
+                height: 370,
+                child: AnimatedBuilder(
+                  animation: Listenable.merge([_flipAnimation, _dropController]),
+                  builder: (context, _) {
+                    final tilt = pi * (1 - _flipAnimation.value);
+                    return Transform(
+                      alignment: Alignment.center,
+                      transform: Matrix4.identity()
+                        ..setEntry(3, 2, 0.001)
+                        ..translate(_dropXOffset.value, _dropYOffset.value)
+                        ..rotateZ(_dropRotation.value)
+                        ..scale(_dropScale.value)
+                        ..rotateY(tilt),
+                      child: _QuotePromptCard(
+                        width: 240,
+                        height: 330,
+                        quote: hasQuote ? '“${quote!.quote}”' : 'Pulling a love note for you…',
+                        author: hasQuote ? '- ${quote!.author}' : 'Love Note',
+                        seed: hasQuote ? quote!.quote : 'loading-quote',
+                      ),
+                    );
+                  },
+                ),
+              ),
             );
           },
         ),
@@ -1780,11 +1890,15 @@ class _PaperCard extends StatelessWidget {
 
 class _QuotePromptCard extends StatelessWidget {
   const _QuotePromptCard({
+    required this.width,
+    required this.height,
     required this.quote,
     required this.author,
     required this.seed,
   });
 
+  final double width;
+  final double height;
   final String quote;
   final String author;
   final String seed;
@@ -1792,34 +1906,32 @@ class _QuotePromptCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.only(top: 4),
-      padding: const EdgeInsets.fromLTRB(14, 14, 14, 20),
+      width: width,
+      height: height,
       decoration: BoxDecoration(
-        color: const Color(0xFFFDFCF8),
-        borderRadius: BorderRadius.circular(8),
+        color: const Color(0xFFF5F5F3),
+        borderRadius: BorderRadius.circular(9),
         boxShadow: const [
           BoxShadow(
-            color: Color(0x331B1B1B),
             blurRadius: 18,
-            offset: Offset(0, 12),
+            offset: Offset(0, 10),
+            color: Color(0x33000000),
           ),
         ],
       ),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 14),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          AspectRatio(
-            aspectRatio: 220 / 330,
+          Expanded(
             child: ClipRRect(
               borderRadius: BorderRadius.circular(4),
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  _BlurMixBackdrop(seed: seed),
+                  _ChatGptTextureBackdrop(seed: seed),
                   DecoratedBox(
                     decoration: BoxDecoration(
-                      border: Border.all(color: const Color(0xCCFFFFFF), width: 1.2),
+                      border: Border.all(color: const Color(0xAAFFFFFF), width: 1.2),
                     ),
                   ),
                   Padding(
@@ -1827,18 +1939,38 @@ class _QuotePromptCard extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Love Note', style: Theme.of(context).textTheme.titleSmall?.copyWith(color: Colors.white, fontWeight: FontWeight.w700)),
+                        Text(
+                          'Love Note',
+                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                                color: const Color(0xFFF8F8F8),
+                                fontWeight: FontWeight.w700,
+                                shadows: const [
+                                  Shadow(color: Color(0xCC000000), blurRadius: 8),
+                                ],
+                              ),
+                        ),
                         const SizedBox(height: 10),
                         Expanded(
                           child: Text(
                             quote,
+                            overflow: TextOverflow.ellipsis,
                             style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                                  color: Colors.white,
-                                  shadows: const [Shadow(color: Color(0x99000000), blurRadius: 8)],
+                                  color: const Color(0xFFF8F8F8),
+                                  shadows: const [
+                                    Shadow(color: Color(0xCC000000), blurRadius: 8),
+                                  ],
                                 ),
                           ),
                         ),
-                        Text(author, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: const Color(0xFFF8F8F8))),
+                        Text(
+                          author,
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: const Color(0xFFF8F8F8),
+                                shadows: const [
+                                  Shadow(color: Color(0xCC000000), blurRadius: 8),
+                                ],
+                              ),
+                        ),
                       ],
                     ),
                   ),
@@ -1846,16 +1978,14 @@ class _QuotePromptCard extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(height: 10),
-          Center(
-            child: Text(
-              'You Me',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontFamily: 'cursive',
-                    fontStyle: FontStyle.italic,
-                    color: const Color(0xFF312824),
-                  ),
-            ),
+          const SizedBox(height: 8),
+          Text(
+            'You Me',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontFamily: 'cursive',
+                  fontStyle: FontStyle.italic,
+                  color: const Color(0xFF312824),
+                ),
           ),
         ],
       ),
