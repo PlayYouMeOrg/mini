@@ -1568,6 +1568,7 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
               if (promptIndex < prompts.length - 1)
                 _BlurMixButton(
                   onPressed: (_submitting || _nextCardCooldown > 0) ? null : _drawNextPrompt,
+                  seed: 'draw-next-card',
                   label: _submitting
                       ? 'Drawing...'
                       : _nextCardCooldown > 0
@@ -1596,6 +1597,7 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
             const SizedBox(height: 8),
             _BlurMixButton(
               onPressed: _submitting ? null : _submitCode,
+              seed: 'pair-for-round',
               label: _submitting ? 'Submitting...' : 'Pair for round',
             )
           ],
@@ -1982,10 +1984,11 @@ class _HeartTimerLoaderState extends State<_HeartTimerLoader>
 }
 
 class _BlurMixButton extends StatelessWidget {
-  const _BlurMixButton({required this.onPressed, required this.label});
+  const _BlurMixButton({required this.onPressed, required this.label, this.seed});
 
   final VoidCallback? onPressed;
   final String label;
+  final String? seed;
 
   @override
   Widget build(BuildContext context) {
@@ -2003,7 +2006,7 @@ class _BlurMixButton extends StatelessWidget {
             child: Stack(
               fit: StackFit.expand,
               children: [
-                const _BlurMixBackdrop(seed: 'button-mix-seed'),
+                _BlurMixBackdrop(seed: seed ?? 'button-$label'),
                 DecoratedBox(
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(14),
@@ -2036,11 +2039,14 @@ class _BlurMixBackdrop extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final rng = Random(seed.hashCode & 0x7fffffff);
-    final palette = [
-      const Color(0xFFB5472D),
-      const Color(0xFF0E6B8C),
-      const Color(0xFF2A1D2F),
-    ]..shuffle(rng);
+    final paletteBank = <List<Color>>[
+      [const Color(0xFFB5472D), const Color(0xFF0E6B8C), const Color(0xFF2A1D2F)],
+      [const Color(0xFFD18600), const Color(0xFF088D98), const Color(0xFF0D2439)],
+      [const Color(0xFFC8A35F), const Color(0xFF7E0F1C), const Color(0xFF2B1E3A)],
+      [const Color(0xFF007A7A), const Color(0xFFE08600), const Color(0xFF04243A)],
+      [const Color(0xFF1E3A5F), const Color(0xFFCA4A2D), const Color(0xFF222D38)],
+    ];
+    final palette = [...paletteBank[rng.nextInt(paletteBank.length)]]..shuffle(rng);
 
     return Stack(
       fit: StackFit.expand,
@@ -2060,7 +2066,7 @@ class _BlurMixBackdrop extends StatelessWidget {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              for (var i = 0; i < 3; i++)
+              for (var i = 0; i < 4; i++)
                 Positioned(
                   left: (rng.nextDouble() - 0.2) * 220,
                   top: (rng.nextDouble() - 0.15) * 140,
@@ -2070,6 +2076,12 @@ class _BlurMixBackdrop extends StatelessWidget {
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       color: palette[rng.nextInt(palette.length)].withOpacity(0.5),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.16),
+                          blurRadius: 30,
+                        ),
+                      ],
                     ),
                   ),
                 ),
