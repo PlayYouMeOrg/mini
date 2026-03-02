@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'dart:ui';
+import 'dart:ui' as ui show Image, ImageShader, TileMode;
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -2000,6 +2001,7 @@ class _HeartTimerLoader extends StatefulWidget {
 class _HeartTimerLoaderState extends State<_HeartTimerLoader>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
+  ui.Image? _textureImage;
 
   @override
   void initState() {
@@ -2008,6 +2010,15 @@ class _HeartTimerLoaderState extends State<_HeartTimerLoader>
       vsync: this,
       duration: const Duration(milliseconds: 1600),
     )..repeat();
+    _loadTextureImage();
+  }
+
+  Future<void> _loadTextureImage() async {
+    final byteData = await rootBundle.load(_chatGptTextureAsset);
+    final codec = await instantiateImageCodec(byteData.buffer.asUint8List());
+    final frame = await codec.getNextFrame();
+    if (!mounted) return;
+    setState(() => _textureImage = frame.image);
   }
 
   @override
@@ -2024,29 +2035,12 @@ class _HeartTimerLoaderState extends State<_HeartTimerLoader>
       child: AnimatedBuilder(
         animation: _controller,
         builder: (context, child) {
-          return DecoratedBox(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(20),
-              image: const DecorationImage(
-                image: AssetImage(_chatGptTextureAsset),
-                fit: BoxFit.cover,
-              ),
-              border: Border.all(color: const Color(0xDDFFFFFF), width: 1.5),
-              boxShadow: const [
-                BoxShadow(
-                  color: Color(0x33000000),
-                  blurRadius: 10,
-                  offset: Offset(0, 3),
-                ),
-              ],
+          return CustomPaint(
+            painter: _HeartRateBarPainter(
+              progress: _controller.value,
+              textureImage: _textureImage,
             ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(20),
-              child: CustomPaint(
-                painter: _HeartRateBarPainter(progress: _controller.value),
-                child: const SizedBox.expand(),
-              ),
-            ),
+            child: const SizedBox.expand(),
           );
         },
       ),
@@ -2055,54 +2049,81 @@ class _HeartTimerLoaderState extends State<_HeartTimerLoader>
 }
 
 class _HeartRateBarPainter extends CustomPainter {
-  const _HeartRateBarPainter({required this.progress});
+  const _HeartRateBarPainter({required this.progress, required this.textureImage});
 
   final double progress;
+  final ui.Image? textureImage;
 
   @override
   void paint(Canvas canvas, Size size) {
-    final barPaint = Paint()
-      ..color = const Color(0xCCEA4F6A)
-      ..strokeWidth = 7
-      ..strokeCap = StrokeCap.round
-      ..style = PaintingStyle.stroke;
-
     final glowPaint = Paint()
-      ..color = const Color(0x99FF6B86)
+      ..color = const Color(0x66FF6B86)
       ..strokeWidth = 13
       ..strokeCap = StrokeCap.round
       ..style = PaintingStyle.stroke
       ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 7);
 
-    final baselineY = size.height * 0.72;
-    final cycleWidth = size.width * 0.38;
-    final cycleStart = (size.width + cycleWidth) * progress - cycleWidth;
+    final baselineY = size.height * 0.65;
+    final revealX = size.width * progress;
+    final pulseWidth = size.width * 0.18;
+    final path = Path()..moveTo(0, baselineY);
 
-    final path = Path()
-      ..moveTo(cycleStart, baselineY)
-      ..lineTo(cycleStart + cycleWidth * 0.34, baselineY)
-      ..lineTo(cycleStart + cycleWidth * 0.46, baselineY - size.height * 0.34)
-      ..lineTo(cycleStart + cycleWidth * 0.56, baselineY + size.height * 0.12)
-      ..lineTo(cycleStart + cycleWidth * 0.7, baselineY - size.height * 0.2)
-      ..lineTo(cycleStart + cycleWidth, baselineY);
+    double x = 0;
+    while (x < size.width) {
+      path
+        ..lineTo(x + pulseWidth * 0.30, baselineY)
+        ..lineTo(x + pulseWidth * 0.42, baselineY - size.height * 0.30)
+        ..lineTo(x + pulseWidth * 0.55, baselineY + size.height * 0.12)
+        ..lineTo(x + pulseWidth * 0.70, baselineY - size.height * 0.18)
+        ..lineTo(x + pulseWidth, baselineY);
+      x += pulseWidth;
+    }
+
+    canvas.save();
+    canvas.clipRect(Rect.fromLTWH(0, 0, revealX, size.height));
+
+    if (textureImage != null) {
+      final bounds = Offset.zero & size;
+      canvas.saveLayer(bounds, Paint());
+      canvas.drawPath(
+        path,
+        Paint()
+          ..color = Colors.white
+          ..strokeWidth = 7
+          ..strokeCap = StrokeCap.round
+          ..style = PaintingStyle.stroke,
+      );
+      canvas.drawRect(
+        bounds,
+        Paint()
+          ..shader = ui.ImageShader(
+            textureImage!,
+            ui.TileMode.repeated,
+            ui.TileMode.mirror,
+            Matrix4.identity().scaled(0.35, 0.35).storage,
+          )
+          ..blendMode = BlendMode.srcIn
+          ..imageFilter = ImageFilter.blur(sigmaX: 2.2, sigmaY: 2.2),
+      );
+      canvas.restore();
+    } else {
+      canvas.drawPath(
+        path,
+        Paint()
+          ..color = const Color(0xCCEA4F6A)
+          ..strokeWidth = 7
+          ..strokeCap = StrokeCap.round
+          ..style = PaintingStyle.stroke,
+      );
+    }
 
     canvas.drawPath(path, glowPaint);
-    canvas.drawPath(path, barPaint);
-
-    final trackPaint = Paint()
-      ..color = const Color(0x66FFFFFF)
-      ..strokeWidth = 2.5
-      ..style = PaintingStyle.stroke;
-    canvas.drawLine(
-      Offset(0, baselineY),
-      Offset(size.width, baselineY),
-      trackPaint,
-    );
+    canvas.restore();
   }
 
   @override
   bool shouldRepaint(covariant _HeartRateBarPainter oldDelegate) {
-    return oldDelegate.progress != progress;
+    return oldDelegate.progress != progress || oldDelegate.textureImage != textureImage;
   }
 }
 
