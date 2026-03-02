@@ -12,8 +12,8 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'session_domain.dart';
 
-const _creme = Color(0xFFF5F4EF);
-const _paper = Color(0xFFECEAE2);
+const _creme = Color(0xFFFAFAF7);
+const _paper = Color(0xFFF3F3EF);
 const _ink = Color(0xFF070707);
 const _gameViewportSize = Size(390, 844);
 
@@ -1239,23 +1239,12 @@ class WaitingView extends StatelessWidget {
         FutureBuilder<LoveQuote>(
           future: LoveQuotesRepository.pickRandomQuote(),
           builder: (context, snapshot) {
-            if (!snapshot.hasData) return const SizedBox.shrink();
-            final quote = snapshot.data!;
-            return Card(
-              color: Colors.white,
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('Love Note', style: TextStyle(fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 8),
-                    Text('“${quote.quote}”'),
-                    const SizedBox(height: 6),
-                    Text('- ${quote.author}', style: Theme.of(context).textTheme.bodySmall),
-                  ],
-                ),
-              ),
+            final hasQuote = snapshot.hasData;
+            final quote = snapshot.data;
+            return _QuotePromptCard(
+              quote: hasQuote ? '“${quote!.quote}”' : 'Pulling a love note for you…',
+              author: hasQuote ? '- ${quote!.author}' : 'Love Note',
+              seed: hasQuote ? quote!.quote : 'loading-quote',
             );
           },
         ),
@@ -1590,15 +1579,13 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
                 ),
               const SizedBox(height: 10),
               if (promptIndex < prompts.length - 1)
-                FilledButton(
+                _BlurMixButton(
                   onPressed: (_submitting || _nextCardCooldown > 0) ? null : _drawNextPrompt,
-                  child: Text(
-                    _submitting
-                        ? 'Drawing...'
-                        : _nextCardCooldown > 0
-                            ? 'Draw next card (${_nextCardCooldown}s)'
-                            : 'Draw next card',
-                  ),
+                  label: _submitting
+                      ? 'Drawing...'
+                      : _nextCardCooldown > 0
+                          ? 'Draw next card (${_nextCardCooldown}s)'
+                          : 'Draw next card',
                 )
               else
                 const Text('Round complete. Wait for next round to pair with someone new.'),
@@ -1620,9 +1607,9 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
               ),
             ),
             const SizedBox(height: 8),
-            FilledButton(
+            _BlurMixButton(
               onPressed: _submitting ? null : _submitCode,
-              child: Text(_submitting ? 'Submitting...' : 'Pair for round'),
+              label: _submitting ? 'Submitting...' : 'Pair for round',
             )
           ],
           if (widget.error != null) ...[
@@ -1857,6 +1844,161 @@ class _PaperCard extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _QuotePromptCard extends StatelessWidget {
+  const _QuotePromptCard({
+    required this.quote,
+    required this.author,
+    required this.seed,
+  });
+
+  final String quote;
+  final String author;
+  final String seed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      height: 190,
+      margin: const EdgeInsets.only(top: 4),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            _BlurMixBackdrop(seed: seed),
+            DecoratedBox(
+              decoration: BoxDecoration(
+                border: Border.all(color: const Color(0xCCFFFFFF), width: 1.2),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Love Note', style: Theme.of(context).textTheme.titleSmall?.copyWith(color: Colors.white, fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 10),
+                  Expanded(
+                    child: Text(
+                      quote,
+                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                            color: Colors.white,
+                            shadows: const [Shadow(color: Color(0x99000000), blurRadius: 8)],
+                          ),
+                    ),
+                  ),
+                  Text(author, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: const Color(0xFFF8F8F8))),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _BlurMixButton extends StatelessWidget {
+  const _BlurMixButton({required this.onPressed, required this.label});
+
+  final VoidCallback? onPressed;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final disabled = onPressed == null;
+    return GestureDetector(
+      onTap: onPressed,
+      child: Opacity(
+        opacity: disabled ? 0.55 : 1,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(14),
+          child: Container(
+            width: double.infinity,
+            height: 48,
+            decoration: BoxDecoration(borderRadius: BorderRadius.circular(14)),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                const _BlurMixBackdrop(seed: 'button-mix-seed'),
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: const Color(0xCCFFFFFF), width: 1),
+                  ),
+                ),
+                Center(
+                  child: Text(
+                    label,
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BlurMixBackdrop extends StatelessWidget {
+  const _BlurMixBackdrop({required this.seed});
+
+  final String seed;
+
+  @override
+  Widget build(BuildContext context) {
+    final rng = Random(seed.hashCode & 0x7fffffff);
+    final palette = [
+      const Color(0xFFB5472D),
+      const Color(0xFF0E6B8C),
+      const Color(0xFF2A1D2F),
+    ]..shuffle(rng);
+
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: RadialGradient(
+              center: Alignment(-0.7 + rng.nextDouble() * 1.1, -0.5 + rng.nextDouble()),
+              radius: 1.5,
+              colors: [palette[0], palette[1], palette[2]],
+              stops: const [0.1, 0.6, 1],
+            ),
+          ),
+        ),
+        ImageFiltered(
+          imageFilter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              for (var i = 0; i < 3; i++)
+                Positioned(
+                  left: (rng.nextDouble() - 0.2) * 220,
+                  top: (rng.nextDouble() - 0.15) * 140,
+                  child: Container(
+                    width: 120 + rng.nextDouble() * 70,
+                    height: 120 + rng.nextDouble() * 70,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: palette[rng.nextInt(palette.length)].withOpacity(0.5),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
