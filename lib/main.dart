@@ -1226,16 +1226,6 @@ class WaitingView extends StatelessWidget {
       children: [
         Text('Waiting Room', style: Theme.of(context).textTheme.headlineSmall),
         const SizedBox(height: 16),
-        if (player != null) ...[
-          Text('Your code: ${player!.inviteCode}',
-              style: Theme.of(context)
-                  .textTheme
-                  .titleLarge
-                  ?.copyWith(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          const Text('Share this code so other players can pair with you.'),
-        ],
-        const SizedBox(height: 16),
         FutureBuilder<LoveQuote>(
           future: LoveQuotesRepository.pickRandomQuote(),
           builder: (context, snapshot) {
@@ -1248,13 +1238,10 @@ class WaitingView extends StatelessWidget {
             );
           },
         ),
-        const SizedBox(height: 16),
-        Text('Session status: ${session?.status ?? 'unknown'}'),
-        Text('Current round: ${session?.round?.toString() ?? '-'}'),
-        const SizedBox(height: 20),
-        const CircularProgressIndicator(),
+        const SizedBox(height: 28),
+        const Center(child: _HeartTimerLoader()),
         const SizedBox(height: 12),
-        const Text('Waiting for session status to change...'),
+        const Center(child: Text('Waiting for the session to start')),
         if (error != null) ...[
           const SizedBox(height: 12),
           Text(error!, style: const TextStyle(color: Colors.red)),
@@ -1863,41 +1850,132 @@ class _QuotePromptCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      height: 190,
       margin: const EdgeInsets.only(top: 4),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            _BlurMixBackdrop(seed: seed),
-            DecoratedBox(
-              decoration: BoxDecoration(
-                border: Border.all(color: const Color(0xCCFFFFFF), width: 1.2),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 20),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFDFCF8),
+        borderRadius: BorderRadius.circular(8),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x331B1B1B),
+            blurRadius: 18,
+            offset: Offset(0, 12),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          AspectRatio(
+            aspectRatio: 1.15,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: Stack(
+                fit: StackFit.expand,
                 children: [
-                  Text('Love Note', style: Theme.of(context).textTheme.titleSmall?.copyWith(color: Colors.white, fontWeight: FontWeight.w700)),
-                  const SizedBox(height: 10),
-                  Expanded(
-                    child: Text(
-                      quote,
-                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                            color: Colors.white,
-                            shadows: const [Shadow(color: Color(0x99000000), blurRadius: 8)],
-                          ),
+                  _BlurMixBackdrop(seed: seed),
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      border: Border.all(color: const Color(0xCCFFFFFF), width: 1.2),
                     ),
                   ),
-                  Text(author, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: const Color(0xFFF8F8F8))),
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Love Note', style: Theme.of(context).textTheme.titleSmall?.copyWith(color: Colors.white, fontWeight: FontWeight.w700)),
+                        const SizedBox(height: 10),
+                        Expanded(
+                          child: Text(
+                            quote,
+                            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                                  color: Colors.white,
+                                  shadows: const [Shadow(color: Color(0x99000000), blurRadius: 8)],
+                                ),
+                          ),
+                        ),
+                        Text(author, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: const Color(0xFFF8F8F8))),
+                      ],
+                    ),
+                  ),
                 ],
               ),
             ),
-          ],
-        ),
+          ),
+          const SizedBox(height: 10),
+          Center(
+            child: Text(
+              'You Me',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontFamily: 'cursive',
+                    fontStyle: FontStyle.italic,
+                    color: const Color(0xFF312824),
+                  ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HeartTimerLoader extends StatefulWidget {
+  const _HeartTimerLoader();
+
+  @override
+  State<_HeartTimerLoader> createState() => _HeartTimerLoaderState();
+}
+
+class _HeartTimerLoaderState extends State<_HeartTimerLoader>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1600),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 72,
+      height: 72,
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (context, child) {
+          final t = Curves.easeInOut.transform(_controller.value);
+          final heartScale = 0.9 + (0.25 * sin(_controller.value * pi * 2));
+          return Stack(
+            alignment: Alignment.center,
+            children: [
+              CircularProgressIndicator(
+                value: _controller.value,
+                strokeWidth: 4,
+                color: Colors.pink.shade300,
+                backgroundColor: Colors.pink.shade100.withOpacity(0.35),
+              ),
+              Transform.scale(
+                scale: heartScale,
+                child: Icon(
+                  Icons.favorite,
+                  size: 28 + (3 * t),
+                  color: Colors.pink.shade400,
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
