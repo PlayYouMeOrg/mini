@@ -2016,7 +2016,7 @@ class _HeartTimerLoaderState extends State<_HeartTimerLoader>
     super.initState();
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1600),
+      duration: const Duration(milliseconds: 2800),
     )..repeat();
     _loadTextureImage();
   }
@@ -2073,19 +2073,33 @@ class _HeartRateBarPainter extends CustomPainter {
 
     final baselineY = size.height * 0.65;
     final revealX = size.width * progress;
-    final pulseWidth = size.width * 0.18;
     final path = Path()..moveTo(0, baselineY);
 
-    double x = 0;
-    while (x < size.width) {
+    const pulseCount = 2;
+    final leadingSegment = size.width * 0.10;
+    final trailingSegment = size.width * 0.10;
+    final pulseWidth = size.width * 0.20;
+    final gapWidth = (size.width - leadingSegment - trailingSegment - (pulseWidth * pulseCount)) /
+        (pulseCount + 1);
+
+    double x = leadingSegment + gapWidth;
+    path.lineTo(x, baselineY);
+    for (var i = 0; i < pulseCount; i++) {
       path
         ..lineTo(x + pulseWidth * 0.30, baselineY)
         ..lineTo(x + pulseWidth * 0.42, baselineY - size.height * 0.30)
         ..lineTo(x + pulseWidth * 0.55, baselineY + size.height * 0.12)
         ..lineTo(x + pulseWidth * 0.70, baselineY - size.height * 0.18)
         ..lineTo(x + pulseWidth, baselineY);
+
       x += pulseWidth;
+      if (i < pulseCount - 1) {
+        x += gapWidth;
+        path.lineTo(x, baselineY);
+      }
     }
+    path.lineTo(size.width - trailingSegment, baselineY);
+    path.lineTo(size.width, baselineY);
 
     canvas.save();
     canvas.clipRect(Rect.fromLTWH(0, 0, revealX, size.height));
