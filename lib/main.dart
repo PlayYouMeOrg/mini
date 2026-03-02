@@ -17,7 +17,20 @@ const _creme = Color(0xFFFAFAF7);
 const _paper = Color(0xFFF3F3EF);
 const _ink = Color(0xFF070707);
 const _gameViewportSize = Size(390, 844);
-const _chatGptTextureAsset = 'assets/chat_gpt_texture.png';
+const _chatGptTextureAssets = [
+  'assets/chat_gpt_texture.png',
+  'assets/chat_gpt_texture_alt.png',
+];
+
+String _textureAssetForSeed(String seed) {
+  final rng = Random(seed.hashCode & 0x7fffffff);
+  return _chatGptTextureAssets[rng.nextInt(_chatGptTextureAssets.length)];
+}
+
+Color _toneColorForSeed(String seed) {
+  final rng = Random(seed.hashCode & 0x7fffffff);
+  return HSLColor.fromAHSL(1, rng.nextDouble() * 360, 0.46, 0.52).toColor();
+}
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -1335,8 +1348,8 @@ class _WaitingViewState extends State<WaitingView>
                       child: _QuotePromptCard(
                         width: 240,
                         height: 330,
-                        quote: hasQuote ? '“${quote!.quote}”' : 'Pulling a love note for you…',
-                        author: hasQuote ? '- ${quote!.author}' : 'Love Note',
+                        quote: hasQuote ? '“${quote!.quote}”' : 'Pulling a quote for you…',
+                        author: hasQuote ? '- ${quote!.author}' : '',
                         seed: hasQuote ? quote!.quote : 'loading-quote',
                       ),
                     );
@@ -1943,40 +1956,36 @@ class _QuotePromptCard extends StatelessWidget {
                   Padding(
                     padding: const EdgeInsets.all(16),
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        Text(
-                          'Love Note',
-                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                                color: const Color(0xFFF8F8F8),
-                                fontWeight: FontWeight.w700,
-                                shadows: const [
-                                  Shadow(color: Color(0xCC000000), blurRadius: 8),
-                                ],
-                              ),
-                        ),
-                        const SizedBox(height: 10),
-                        Expanded(
+                        Flexible(
                           child: Text(
                             quote,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                            textAlign: TextAlign.center,
+                            softWrap: true,
+                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
                                   color: const Color(0xFFF8F8F8),
+                                  fontWeight: FontWeight.w700,
                                   shadows: const [
                                     Shadow(color: Color(0xCC000000), blurRadius: 8),
                                   ],
                                 ),
                           ),
                         ),
-                        Text(
-                          author,
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: const Color(0xFFF8F8F8),
-                                shadows: const [
-                                  Shadow(color: Color(0xCC000000), blurRadius: 8),
-                                ],
-                              ),
-                        ),
+                        if (author.isNotEmpty) ...[
+                          const SizedBox(height: 12),
+                          Text(
+                            author,
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: const Color(0xFFF8F8F8),
+                                  shadows: const [
+                                    Shadow(color: Color(0xCC000000), blurRadius: 8),
+                                  ],
+                                ),
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -2009,11 +2018,17 @@ class _HeartTimerLoader extends StatefulWidget {
 class _HeartTimerLoaderState extends State<_HeartTimerLoader>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
+  late final String _textureAsset;
+  late final Color _toneColor;
   ui.Image? _textureImage;
 
   @override
   void initState() {
     super.initState();
+    final seed =
+        'heart-rate-${DateTime.now().microsecondsSinceEpoch}-${Random().nextInt(1 << 20)}';
+    _textureAsset = _textureAssetForSeed(seed);
+    _toneColor = _toneColorForSeed('$seed-tone');
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 2800),
@@ -2022,7 +2037,7 @@ class _HeartTimerLoaderState extends State<_HeartTimerLoader>
   }
 
   Future<void> _loadTextureImage() async {
-    final byteData = await rootBundle.load(_chatGptTextureAsset);
+    final byteData = await rootBundle.load(_textureAsset);
     final codec = await instantiateImageCodec(byteData.buffer.asUint8List());
     final frame = await codec.getNextFrame();
     if (!mounted) return;
@@ -2047,6 +2062,7 @@ class _HeartTimerLoaderState extends State<_HeartTimerLoader>
             painter: _HeartRateBarPainter(
               progress: _controller.value,
               textureImage: _textureImage,
+              toneColor: _toneColor,
             ),
             child: const SizedBox.expand(),
           );
@@ -2057,15 +2073,20 @@ class _HeartTimerLoaderState extends State<_HeartTimerLoader>
 }
 
 class _HeartRateBarPainter extends CustomPainter {
-  const _HeartRateBarPainter({required this.progress, required this.textureImage});
+  const _HeartRateBarPainter({
+    required this.progress,
+    required this.textureImage,
+    required this.toneColor,
+  });
 
   final double progress;
   final ui.Image? textureImage;
+  final Color toneColor;
 
   @override
   void paint(Canvas canvas, Size size) {
     final glowPaint = Paint()
-      ..color = const Color(0x66FF6B86)
+      ..color = toneColor.withOpacity(0.45)
       ..strokeWidth = 13
       ..strokeCap = StrokeCap.round
       ..style = PaintingStyle.stroke
@@ -2104,34 +2125,44 @@ class _HeartRateBarPainter extends CustomPainter {
     path.lineTo(size.width - trailingSegment, baselineY);
     path.lineTo(size.width, baselineY);
 
-    void drawWave({required Paint Function() paintBuilder, required Rect clipRect}) {
-      if (clipRect.width <= 0) return;
-      canvas.save();
-      canvas.clipRect(clipRect);
+    canvas.save();
+    canvas.clipRect(Rect.fromLTWH(0, 0, revealX, size.height));
 
-      if (textureImage != null) {
-        final bounds = Offset.zero & size;
-        canvas.saveLayer(bounds, Paint());
-        canvas.drawPath(path, paintBuilder());
-        canvas.drawRect(
-          bounds,
-          Paint()
-            ..shader = ui.ImageShader(
-              textureImage!,
-              ui.TileMode.repeated,
-              ui.TileMode.mirror,
-              Matrix4.identity().scaled(0.35, 0.35).storage,
-            )
-            ..blendMode = BlendMode.srcIn
-            ..imageFilter = ImageFilter.blur(sigmaX: 2.2, sigmaY: 2.2),
-        );
-        canvas.restore();
-      } else {
-        canvas.drawPath(path, paintBuilder());
-      }
-
-      canvas.drawPath(path, glowPaint);
+    if (textureImage != null) {
+      final bounds = Offset.zero & size;
+      canvas.saveLayer(bounds, Paint());
+      canvas.drawPath(
+        path,
+        Paint()
+          ..color = Colors.white
+          ..strokeWidth = 7
+          ..strokeCap = StrokeCap.round
+          ..style = PaintingStyle.stroke,
+      );
+      canvas.drawRect(
+        bounds,
+        Paint()
+          ..shader = ui.ImageShader(
+            textureImage!,
+            ui.TileMode.repeated,
+            ui.TileMode.mirror,
+            Matrix4.identity().scaled(0.35, 0.35).storage,
+          )
+          ..blendMode = BlendMode.srcIn
+          ..colorFilter =
+              ColorFilter.mode(toneColor.withOpacity(0.55), BlendMode.modulate)
+          ..imageFilter = ImageFilter.blur(sigmaX: 2.2, sigmaY: 2.2),
+      );
       canvas.restore();
+    } else {
+      canvas.drawPath(
+        path,
+        Paint()
+          ..color = toneColor.withOpacity(0.88)
+          ..strokeWidth = 7
+          ..strokeCap = StrokeCap.round
+          ..style = PaintingStyle.stroke,
+      );
     }
 
     final oldWavePaint = Paint()
@@ -2159,7 +2190,9 @@ class _HeartRateBarPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _HeartRateBarPainter oldDelegate) {
-    return oldDelegate.progress != progress || oldDelegate.textureImage != textureImage;
+    return oldDelegate.progress != progress ||
+        oldDelegate.textureImage != textureImage ||
+        oldDelegate.toneColor != toneColor;
   }
 }
 
@@ -2250,6 +2283,8 @@ class _ChatGptTextureBackdrop extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final rng = Random(seed.hashCode & 0x7fffffff);
+    final textureAsset = _textureAssetForSeed(seed);
+    final toneColor = _toneColorForSeed('$seed-tone');
     final alignment = Alignment(
       -1 + (rng.nextDouble() * 2),
       -1 + (rng.nextDouble() * 2),
@@ -2269,7 +2304,7 @@ class _ChatGptTextureBackdrop extends StatelessWidget {
               child: Transform.scale(
                 scale: scale,
                 child: Image.asset(
-                  _chatGptTextureAsset,
+                  textureAsset,
                   fit: BoxFit.cover,
                   alignment: alignment,
                 ),
@@ -2283,8 +2318,14 @@ class _ChatGptTextureBackdrop extends StatelessWidget {
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
               colors: [
-                Colors.black.withOpacity(0.2),
-                Colors.black.withOpacity(0.45),
+                Color.alphaBlend(
+                  toneColor.withOpacity(0.32),
+                  Colors.black.withOpacity(0.2),
+                ),
+                Color.alphaBlend(
+                  toneColor.withOpacity(0.45),
+                  Colors.black.withOpacity(0.45),
+                ),
               ],
             ),
           ),
