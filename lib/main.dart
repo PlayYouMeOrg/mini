@@ -1840,7 +1840,11 @@ class _PaperCard extends StatelessWidget {
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  _ChatGptTextureBackdrop(seed: seed),
+                  _ChatGptTextureBackdrop(
+                    seed: seed,
+                    minScale: 3.2,
+                    maxScale: 4.8,
+                  ),
                   Positioned.fill(
                     child: DecoratedBox(
                       decoration: BoxDecoration(
@@ -1925,7 +1929,11 @@ class _QuotePromptCard extends StatelessWidget {
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  _ChatGptTextureBackdrop(seed: seed),
+                  _ChatGptTextureBackdrop(
+                    seed: seed,
+                    minScale: 3.2,
+                    maxScale: 4.8,
+                  ),
                   DecoratedBox(
                     decoration: BoxDecoration(
                       border: Border.all(color: const Color(0xAAFFFFFF), width: 1.2),
@@ -2154,21 +2162,41 @@ class _BlurMixButton extends StatelessWidget {
   }
 }
 
-class _BlurMixBackdrop extends StatelessWidget {
+class _BlurMixBackdrop extends StatefulWidget {
   const _BlurMixBackdrop({required this.seed});
 
   final String seed;
 
   @override
+  State<_BlurMixBackdrop> createState() => _BlurMixBackdropState();
+}
+
+class _BlurMixBackdropState extends State<_BlurMixBackdrop> {
+  late final String _instanceSeed;
+
+  @override
+  void initState() {
+    super.initState();
+    final instanceSalt = DateTime.now().microsecondsSinceEpoch + Random().nextInt(1 << 20);
+    _instanceSeed = '${widget.seed}-$instanceSalt';
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return _ChatGptTextureBackdrop(seed: seed);
+    return _ChatGptTextureBackdrop(seed: _instanceSeed);
   }
 }
 
 class _ChatGptTextureBackdrop extends StatelessWidget {
-  const _ChatGptTextureBackdrop({required this.seed});
+  const _ChatGptTextureBackdrop({
+    required this.seed,
+    this.minScale = 5.2,
+    this.maxScale = 7.6,
+  });
 
   final String seed;
+  final double minScale;
+  final double maxScale;
 
   @override
   Widget build(BuildContext context) {
@@ -2178,7 +2206,7 @@ class _ChatGptTextureBackdrop extends StatelessWidget {
       -1 + (rng.nextDouble() * 2),
     );
     final rotation = (rng.nextDouble() * 2 - 1) * (pi / 24);
-    final scale = 5.2 + (rng.nextDouble() * 2.4);
+    final scale = minScale + (rng.nextDouble() * (maxScale - minScale));
     final blurSigma = 1.4 + (rng.nextDouble() * 1.4);
 
     return Stack(
