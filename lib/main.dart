@@ -138,14 +138,22 @@ class MiniApp extends StatelessWidget {
         filledButtonTheme: FilledButtonThemeData(
           style: FilledButton.styleFrom(
             backgroundColor: Colors.black.withOpacity(0.34),
-            foregroundColor: Colors.white,
+            foregroundColor: Colors.black,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             side: const BorderSide(color: _offWhiteBorder),
+          ),
+        ),
+        textButtonTheme: TextButtonThemeData(
+          style: TextButton.styleFrom(
+            foregroundColor: Colors.black,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           ),
         ),
         outlinedButtonTheme: OutlinedButtonThemeData(
           style: OutlinedButton.styleFrom(
-            foregroundColor: _offWhite,
+            foregroundColor: Colors.black,
             side: const BorderSide(color: _offWhiteBorder),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           ),
         ),
         inputDecorationTheme: InputDecorationTheme(
@@ -938,11 +946,18 @@ class _JoinWithCodeViewState extends State<JoinWithCodeView> {
           constraints: const BoxConstraints(maxWidth: 360),
           child: Column(
             mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Text('Join with Code', style: Theme.of(context).textTheme.headlineSmall),
+              Text(
+                'Join with Code',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
               const SizedBox(height: 12),
-              const Text('Enter your session code to join the signup flow.'),
+              const Text(
+                'Enter your session code to join the signup flow.',
+                textAlign: TextAlign.center,
+              ),
               const SizedBox(height: 16),
               TextField(
                 controller: _codeCtrl,
@@ -1121,12 +1136,18 @@ class _SignupFormState extends State<SignupForm> {
       child: Form(
         key: _formKey,
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Text('Join session ${widget.sessionId}',
-                style: Theme.of(context).textTheme.headlineSmall),
+            Text(
+              'Join session ${widget.sessionId}',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.headlineSmall,
+            ),
             const SizedBox(height: 12),
-            const Text('Sign up and authenticate to enter the game round queue.'),
+            const Text(
+              'Sign up and authenticate to enter the game round queue.',
+              textAlign: TextAlign.center,
+            ),
             const SizedBox(height: 24),
             _input(_nameCtrl, 'Name'),
             const SizedBox(height: 12),
@@ -1143,6 +1164,8 @@ class _SignupFormState extends State<SignupForm> {
               children: [
                 Checkbox(
                   value: _acceptedTermsAndGameTexts,
+                  fillColor: WidgetStateProperty.all(Colors.white),
+                  checkColor: Colors.black,
                   onChanged: (value) {
                     setState(() {
                       _acceptedTermsAndGameTexts = value ?? false;
@@ -1192,6 +1215,8 @@ class _SignupFormState extends State<SignupForm> {
               children: [
                 Checkbox(
                   value: _acceptedPromoTexts,
+                  fillColor: WidgetStateProperty.all(Colors.white),
+                  checkColor: Colors.black,
                   onChanged: (value) {
                     setState(() {
                       _acceptedPromoTexts = value ?? false;
@@ -1378,9 +1403,13 @@ class _WaitingViewState extends State<WaitingView>
   @override
   Widget build(BuildContext context) {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        Text('Waiting Room', style: Theme.of(context).textTheme.headlineSmall),
+        Text(
+          'Waiting Room',
+          textAlign: TextAlign.center,
+          style: Theme.of(context).textTheme.headlineSmall,
+        ),
         const SizedBox(height: 16),
         FutureBuilder<LoveQuote>(
           future: LoveQuotesRepository.pickRandomQuote(),
@@ -1811,9 +1840,13 @@ class EndedView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        Text('Round Results', style: Theme.of(context).textTheme.headlineSmall),
+        Text(
+          'Round Results',
+          textAlign: TextAlign.center,
+          style: Theme.of(context).textTheme.headlineSmall,
+        ),
         const SizedBox(height: 12),
         const Text('Status: Ended'),
         const SizedBox(height: 20),
@@ -1927,8 +1960,8 @@ class _PaperCard extends StatelessWidget {
                 children: [
                   _ChatGptTextureBackdrop(
                     seed: seed,
-                    minScale: 3.2,
-                    maxScale: 4.8,
+                    minScale: 1,
+                    maxScale: 1.2,
                     applyTintOverlay: false,
                   ),
                   Positioned.fill(
@@ -2008,8 +2041,8 @@ class _QuotePromptCard extends StatelessWidget {
                 children: [
                   _ChatGptTextureBackdrop(
                     seed: seed,
-                    minScale: 3.2,
-                    maxScale: 4.8,
+                    minScale: 1,
+                    maxScale: 1.2,
                     applyTintOverlay: false,
                   ),
                   DecoratedBox(
@@ -2232,13 +2265,13 @@ class _BlurMixButton extends StatelessWidget {
     this.height = _buttonHeight,
     this.fillColor = _offWhite,
     this.borderColor = _offWhiteBorder,
-    this.textColor = _ink,
+    this.textColor = Colors.black,
     this.textSize = 20,
     this.textWeight = FontWeight.w700,
   });
 
   static const double _buttonWidth = 230;
-  static const double _buttonHeight = 52;
+  static const double _buttonHeight = 46;
 
   final VoidCallback? onPressed;
   final String label;
