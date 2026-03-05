@@ -15,6 +15,8 @@ import 'session_domain.dart';
 
 const _creme = Color(0xFFFAFAF7);
 const _paper = Color(0xFFF3F3EF);
+const _offWhite = Color(0xFFF5F3EB);
+const _offWhiteBorder = Color(0xFFE6E2D6);
 const _ink = Color(0xFF070707);
 const _gameViewportSize = Size(390, 844);
 const _chatGptTextureAssets = [
@@ -103,10 +105,23 @@ class MiniApp extends StatelessWidget {
           primary: _ink,
           surface: _paper,
         ),
-        scaffoldBackgroundColor: _creme,
+        scaffoldBackgroundColor: Colors.transparent,
         textTheme: Typography.blackMountainView.apply(
           bodyColor: _ink,
           displayColor: _ink,
+        ),
+        filledButtonTheme: FilledButtonThemeData(
+          style: FilledButton.styleFrom(
+            backgroundColor: _offWhite,
+            foregroundColor: _ink,
+            side: const BorderSide(color: _offWhiteBorder),
+          ),
+        ),
+        outlinedButtonTheme: OutlinedButtonThemeData(
+          style: OutlinedButton.styleFrom(
+            foregroundColor: _offWhite,
+            side: const BorderSide(color: _offWhiteBorder),
+          ),
         ),
         inputDecorationTheme: InputDecorationTheme(
           fillColor: _paper,
@@ -700,6 +715,15 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
         child: LayoutBuilder(
           builder: (context, _) => Stack(
             children: [
+              const Positioned.fill(
+                child: _ChatGptTextureBackdrop(
+                  seed: 'main-theme-background',
+                  textureAsset: 'assets/chat_gpt_texture.png',
+                  minScale: 3.4,
+                  maxScale: 4.6,
+                  gradientOpacity: 0.16,
+                ),
+              ),
               const Positioned.fill(child: FilmOverlay()),
               Positioned.fill(
                 child: Center(
@@ -2221,27 +2245,19 @@ class _BlurMixButton extends StatelessWidget {
           child: Container(
             width: double.infinity,
             height: 48,
-            decoration: BoxDecoration(borderRadius: BorderRadius.circular(14)),
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                _BlurMixBackdrop(seed: seed ?? 'button-$label'),
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: const Color(0xCCFFFFFF), width: 1),
-                  ),
-                ),
-                Center(
-                  child: Text(
-                    label,
-                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w700,
-                        ),
-                  ),
-                ),
-              ],
+            decoration: BoxDecoration(
+              color: _offWhite,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: _offWhiteBorder),
+            ),
+            child: Center(
+              child: Text(
+                label,
+                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      color: _ink,
+                      fontWeight: FontWeight.w700,
+                    ),
+              ),
             ),
           ),
         ),
@@ -2278,18 +2294,22 @@ class _BlurMixBackdropState extends State<_BlurMixBackdrop> {
 class _ChatGptTextureBackdrop extends StatelessWidget {
   const _ChatGptTextureBackdrop({
     required this.seed,
+    this.textureAsset,
     this.minScale = 5.2,
     this.maxScale = 7.6,
+    this.gradientOpacity = 1,
   });
 
   final String seed;
+  final String? textureAsset;
   final double minScale;
   final double maxScale;
+  final double gradientOpacity;
 
   @override
   Widget build(BuildContext context) {
     final rng = Random(seed.hashCode & 0x7fffffff);
-    final textureAsset = _textureAssetForSeed(seed);
+    final resolvedTextureAsset = textureAsset ?? _textureAssetForSeed(seed);
     final toneColor = _toneColorForSeed('$seed-tone');
     final alignment = Alignment(
       -1 + (rng.nextDouble() * 2),
@@ -2310,7 +2330,7 @@ class _ChatGptTextureBackdrop extends StatelessWidget {
               child: Transform.scale(
                 scale: scale,
                 child: Image.asset(
-                  textureAsset,
+                  resolvedTextureAsset,
                   fit: BoxFit.cover,
                   alignment: alignment,
                 ),
@@ -2325,11 +2345,11 @@ class _ChatGptTextureBackdrop extends StatelessWidget {
               end: Alignment.bottomCenter,
               colors: [
                 Color.alphaBlend(
-                  toneColor.withOpacity(0.32),
+                  toneColor.withOpacity(0.32 * gradientOpacity),
                   Colors.black.withOpacity(0.2),
                 ),
                 Color.alphaBlend(
-                  toneColor.withOpacity(0.45),
+                  toneColor.withOpacity(0.45 * gradientOpacity),
                   Colors.black.withOpacity(0.45),
                 ),
               ],
