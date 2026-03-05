@@ -18,7 +18,7 @@ const _paper = Color(0xFFF3F3EF);
 const _offWhite = Color(0xFFF5F3EB);
 const _offWhiteBorder = Color(0xFFE6E2D6);
 const _ink = Color(0xFF070707);
-const _backgroundImageAsset = 'assets/Polaroid1.png';
+const _backgroundImageAsset = 'assets/chat_gpt_texture.png';
 const _gameViewportSize = Size(390, 844);
 const _chatGptTextureAssets = [
   'assets/Polaroid1.png',
@@ -1890,6 +1890,7 @@ class _PaperCard extends StatelessWidget {
                     seed: seed,
                     minScale: 3.2,
                     maxScale: 4.8,
+                    applyTintOverlay: false,
                   ),
                   Positioned.fill(
                     child: DecoratedBox(
@@ -1985,6 +1986,7 @@ class _QuotePromptCard extends StatelessWidget {
                     seed: seed,
                     minScale: 3.2,
                     maxScale: 4.8,
+                    applyTintOverlay: false,
                   ),
                   DecoratedBox(
                     decoration: BoxDecoration(
@@ -2269,6 +2271,7 @@ class _ChatGptTextureBackdrop extends StatelessWidget {
     this.minScale = 5.2,
     this.maxScale = 7.6,
     this.gradientOpacity = 1,
+    this.applyTintOverlay = true,
   });
 
   final String seed;
@@ -2276,6 +2279,7 @@ class _ChatGptTextureBackdrop extends StatelessWidget {
   final double minScale;
   final double maxScale;
   final double gradientOpacity;
+  final bool applyTintOverlay;
 
   @override
   Widget build(BuildContext context) {
@@ -2309,24 +2313,25 @@ class _ChatGptTextureBackdrop extends StatelessWidget {
             ),
           ),
         ),
-        DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [
-                Color.alphaBlend(
-                  toneColor.withOpacity(0.24 * gradientOpacity),
-                  Colors.black.withOpacity(0.36),
-                ),
-                Color.alphaBlend(
-                  toneColor.withOpacity(0.34 * gradientOpacity),
-                  Colors.black.withOpacity(0.62),
-                ),
-              ],
+        if (applyTintOverlay)
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Color.alphaBlend(
+                    toneColor.withOpacity(0.24 * gradientOpacity),
+                    Colors.black.withOpacity(0.36),
+                  ),
+                  Color.alphaBlend(
+                    toneColor.withOpacity(0.34 * gradientOpacity),
+                    Colors.black.withOpacity(0.62),
+                  ),
+                ],
+              ),
             ),
           ),
-        ),
       ],
     );
   }
