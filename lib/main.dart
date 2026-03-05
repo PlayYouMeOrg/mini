@@ -2196,7 +2196,7 @@ class _HeartRateBarPainter extends CustomPainter {
     final baseGapWidth =
         (size.width - leadingSegment - trailingSegment - (pulseWidth * pulseCount)) /
             (pulseCount + 1);
-    final gapWidth = baseGapWidth * 0.5;
+    final gapWidth = baseGapWidth * 0.3;
 
     double x = leadingSegment + gapWidth;
     path.lineTo(x, baselineY);
