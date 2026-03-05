@@ -2227,6 +2227,9 @@ class _HeartRateBarPainter extends CustomPainter {
 class _BlurMixButton extends StatelessWidget {
   const _BlurMixButton({required this.onPressed, required this.label, this.seed});
 
+  static const double _buttonWidth = 230;
+  static const double _buttonHeight = 52;
+
   final VoidCallback? onPressed;
   final String label;
   final String? seed;
@@ -2240,21 +2243,26 @@ class _BlurMixButton extends StatelessWidget {
         opacity: disabled ? 0.55 : 1,
         child: ClipRRect(
           borderRadius: BorderRadius.circular(14),
-          child: Container(
-            width: double.infinity,
-            height: 48,
-            decoration: BoxDecoration(
-              color: _offWhite,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: _offWhiteBorder),
-            ),
-            child: Center(
-              child: Text(
-                label,
-                style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                      color: _ink,
-                      fontWeight: FontWeight.w700,
-                    ),
+          child: Align(
+            alignment: Alignment.center,
+            child: Container(
+              width: _buttonWidth,
+              height: _buttonHeight,
+              decoration: BoxDecoration(
+                color: _offWhite,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: _offWhiteBorder),
+              ),
+              child: Center(
+                child: Text(
+                  label,
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        color: _ink,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 20,
+                      ),
+                ),
               ),
             ),
           ),
