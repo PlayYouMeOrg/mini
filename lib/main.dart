@@ -18,6 +18,7 @@ const _paper = Color(0xFFF3F3EF);
 const _offWhite = Color(0xFFF5F3EB);
 const _offWhiteBorder = Color(0xFFE6E2D6);
 const _ink = Color(0xFF070707);
+const _backgroundImageAsset = 'assets/chat_gpt_texture_alt.png';
 const _gameViewportSize = Size(390, 844);
 const _chatGptTextureAssets = [
   'assets/chat_gpt_texture.png',
@@ -107,13 +108,13 @@ class MiniApp extends StatelessWidget {
         ),
         scaffoldBackgroundColor: Colors.transparent,
         textTheme: Typography.blackMountainView.apply(
-          bodyColor: _ink,
-          displayColor: _ink,
+          bodyColor: Colors.white,
+          displayColor: Colors.white,
         ),
         filledButtonTheme: FilledButtonThemeData(
           style: FilledButton.styleFrom(
-            backgroundColor: _offWhite,
-            foregroundColor: _ink,
+            backgroundColor: Colors.black.withOpacity(0.34),
+            foregroundColor: Colors.white,
             side: const BorderSide(color: _offWhiteBorder),
           ),
         ),
@@ -718,7 +719,7 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
               const Positioned.fill(
                 child: _ChatGptTextureBackdrop(
                   seed: 'main-theme-background',
-                  textureAsset: 'assets/chat_gpt_texture.png',
+                  textureAsset: _backgroundImageAsset,
                   minScale: 3.4,
                   maxScale: 4.6,
                   gradientOpacity: 0.16,
@@ -1924,7 +1925,7 @@ class _PaperCard extends StatelessWidget {
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
                   fontFamily: 'cursive',
                   fontStyle: FontStyle.italic,
-                  color: const Color(0xFF312824),
+                  color: Colors.white,
                 ),
           ),
         ],
@@ -2029,7 +2030,7 @@ class _QuotePromptCard extends StatelessWidget {
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
                   fontFamily: 'cursive',
                   fontStyle: FontStyle.italic,
-                  color: const Color(0xFF312824),
+                  color: Colors.white,
                 ),
           ),
         ],
@@ -2267,7 +2268,7 @@ class _BlurMixButton extends StatelessWidget {
               child: Text(
                 label,
                 style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                      color: _ink,
+                      color: Colors.white,
                       fontWeight: FontWeight.w700,
                     ),
               ),
