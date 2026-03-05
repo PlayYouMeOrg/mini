@@ -1638,14 +1638,13 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
         : (player?.currentPromptIndex ?? 0).clamp(0, prompts.length - 1);
 
     return SingleChildScrollView(
-      padding: EdgeInsets.only(bottom: keyboardInset + 24),
+      padding: EdgeInsets.only(top: 20, bottom: keyboardInset + 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text('Round In Progress', style: Theme.of(context).textTheme.headlineSmall),
           const SizedBox(height: 12),
           Text('Round: ${currentRound?.toString() ?? '-'}'),
-          Text('Status: ${widget.session?.status ?? '-'}'),
           const SizedBox(height: 20),
           if (player != null)
             Text('Your code: ${player.inviteCode}',
@@ -1900,18 +1899,24 @@ class _PaperCard extends StatelessWidget {
                   Center(
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Text(
-                        prompt,
-                        maxLines: 4,
-                        overflow: TextOverflow.ellipsis,
-                        textAlign: TextAlign.center,
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              color: const Color(0xFFF8F8F8),
-                              fontWeight: FontWeight.w700,
-                              shadows: const [
-                                Shadow(color: Color(0xCC000000), blurRadius: 8),
-                              ],
-                            ),
+                      child: Align(
+                        alignment: Alignment.topCenter,
+                        child: Padding(
+                          padding: const EdgeInsets.only(top: 22),
+                          child: Text(
+                            prompt,
+                            maxLines: 4,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                                  color: const Color(0xFFF8F8F8),
+                                  fontWeight: FontWeight.w700,
+                                  shadows: const [
+                                    Shadow(color: Color(0xCC000000), blurRadius: 8),
+                                  ],
+                                ),
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -1985,9 +1990,9 @@ class _QuotePromptCard extends StatelessWidget {
                     ),
                   ),
                   Padding(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
                     child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisAlignment: MainAxisAlignment.start,
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
                         Flexible(
@@ -1995,7 +2000,7 @@ class _QuotePromptCard extends StatelessWidget {
                             quote,
                             textAlign: TextAlign.center,
                             softWrap: true,
-                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            style: Theme.of(context).textTheme.titleLarge?.copyWith(
                                   color: const Color(0xFFF8F8F8),
                                   fontWeight: FontWeight.w700,
                                   shadows: const [
@@ -2216,7 +2221,7 @@ class _BlurMixButton extends StatelessWidget {
               child: Text(
                 label,
                 style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                      color: Colors.white,
+                      color: _ink,
                       fontWeight: FontWeight.w700,
                     ),
               ),
