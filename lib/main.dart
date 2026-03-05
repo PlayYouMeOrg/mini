@@ -2116,15 +2116,8 @@ class _HeartRateBarPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final glowPaint = Paint()
-      ..color = toneColor.withOpacity(0.45)
-      ..strokeWidth = 13
-      ..strokeCap = StrokeCap.round
-      ..style = PaintingStyle.stroke
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 7);
-
     final baselineY = size.height * 0.65;
-    final replacementGap = size.width * 0.14;
+    final replacementGap = size.width * 0.16;
     final sweepX = (size.width + replacementGap) * progress;
     final newWaveEndX = (sweepX - replacementGap).clamp(0.0, size.width).toDouble();
     final oldWaveStartX = sweepX.clamp(0.0, size.width).toDouble();
@@ -2156,78 +2149,33 @@ class _HeartRateBarPainter extends CustomPainter {
     path.lineTo(size.width - trailingSegment, baselineY);
     path.lineTo(size.width, baselineY);
 
-    void drawWave({
-      required Paint Function() paintBuilder,
-      required Rect clipRect,
-    }) {
-      if (clipRect.width <= 0) return;
-      canvas.save();
-      canvas.clipRect(clipRect);
-      canvas.drawPath(path, glowPaint);
-      canvas.drawPath(path, paintBuilder());
-      canvas.restore();
-    }
-
-    canvas.save();
-    canvas.clipRect(Rect.fromLTWH(0, 0, size.width, size.height));
-
-    if (textureImage != null) {
-      final bounds = Offset.zero & size;
-      canvas.saveLayer(bounds, Paint());
-      canvas.drawPath(
-        path,
-        Paint()
-          ..color = Colors.white
-          ..strokeWidth = 7
-          ..strokeCap = StrokeCap.round
-          ..style = PaintingStyle.stroke,
-      );
-      canvas.drawRect(
-        bounds,
-        Paint()
-          ..shader = ui.ImageShader(
-            textureImage!,
-            ui.TileMode.repeated,
-            ui.TileMode.mirror,
-            Matrix4.identity().scaled(0.35, 0.35).storage,
-          )
-          ..blendMode = BlendMode.srcIn
-          ..colorFilter =
-              ColorFilter.mode(toneColor.withOpacity(0.55), BlendMode.modulate)
-          ..imageFilter = ImageFilter.blur(sigmaX: 2.2, sigmaY: 2.2),
-      );
-      canvas.restore();
-    } else {
-      canvas.drawPath(
-        path,
-        Paint()
-          ..color = toneColor.withOpacity(0.88)
-          ..strokeWidth = 7
-          ..strokeCap = StrokeCap.round
-          ..style = PaintingStyle.stroke,
-      );
-    }
-    canvas.restore();
-
-    final oldWavePaint = Paint()
-      ..color = const Color(0x99EA4F6A)
-      ..strokeWidth = 7
+    final waveGlowPaint = Paint()
+      ..color = toneColor.withOpacity(0.45)
+      ..strokeWidth = 13
       ..strokeCap = StrokeCap.round
-      ..style = PaintingStyle.stroke;
+      ..style = PaintingStyle.stroke
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 7);
 
-    final newWavePaint = Paint()
+    final wavePaint = Paint()
       ..color = Colors.white
       ..strokeWidth = 7
       ..strokeCap = StrokeCap.round
       ..style = PaintingStyle.stroke;
 
+    void drawWave({required Rect clipRect}) {
+      if (clipRect.width <= 0) return;
+      canvas.save();
+      canvas.clipRect(clipRect);
+      canvas.drawPath(path, waveGlowPaint);
+      canvas.drawPath(path, wavePaint);
+      canvas.restore();
+    }
+
     drawWave(
-      paintBuilder: () => oldWavePaint,
       clipRect: Rect.fromLTWH(oldWaveStartX, 0, size.width - oldWaveStartX, size.height),
     );
 
     drawWave(
-      paintBuilder: () => newWavePaint,
       clipRect: Rect.fromLTWH(0, 0, newWaveEndX, size.height),
     );
   }
