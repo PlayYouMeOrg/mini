@@ -1667,21 +1667,21 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
     return SingleChildScrollView(
       padding: EdgeInsets.only(bottom: keyboardInset + 24),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Text('Round In Progress', style: Theme.of(context).textTheme.headlineSmall),
+          Text(
+            'Round In Progress',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.headlineSmall,
+          ),
           const SizedBox(height: 12),
-          Text('Round: ${currentRound?.toString() ?? '-'}'),
-          const SizedBox(height: 20),
-          if (player != null)
-            Text('Your code: ${player.inviteCode}',
-                style: Theme.of(context)
-                    .textTheme
-                    .titleLarge
-                    ?.copyWith(fontWeight: FontWeight.bold)),
+          Text('Round: ${currentRound?.toString() ?? '-'}', textAlign: TextAlign.center),
           const SizedBox(height: 20),
           if (isPairedThisRound) ...[
-            Text('Prompt ${prompts.isEmpty ? 0 : (promptIndex + 1)} of ${prompts.length}'),
+            Text(
+              'Prompt ${prompts.isEmpty ? 0 : (promptIndex + 1)} of ${prompts.length}',
+              textAlign: TextAlign.center,
+            ),
             const SizedBox(height: 12),
             if (prompts.isNotEmpty) ...[
               Center(
@@ -1740,6 +1740,7 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
               if (_nextCardCooldown > 0)
                 Text(
                   'Next card available in $_nextCardCooldown seconds',
+                  textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               const SizedBox(height: 10),
@@ -1747,6 +1748,13 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
                 _BlurMixButton(
                   onPressed: (_submitting || _nextCardCooldown > 0) ? null : _drawNextPrompt,
                   seed: 'draw-next-card',
+                  width: 190,
+                  height: 48,
+                  fillColor: Colors.transparent,
+                  borderColor: Colors.white,
+                  textColor: Colors.white,
+                  textSize: 22,
+                  textWeight: FontWeight.w800,
                   label: _submitting
                       ? 'Drawing...'
                       : _nextCardCooldown > 0
@@ -1754,11 +1762,17 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
                           : 'Draw next card',
                 )
               else
-                const Text('Round complete. Wait for next round to pair with someone new.'),
+                const Text(
+                  'Round complete. Wait for next round to pair with someone new.',
+                  textAlign: TextAlign.center,
+                ),
             ] else
               const Padding(
                 padding: EdgeInsets.only(top: 10),
-                child: Text('Prompts are syncing. Ask your partner to submit your code too.'),
+                child: Text(
+                  'Prompts are syncing. Ask your partner to submit your code too.',
+                  textAlign: TextAlign.center,
+                ),
               ),
           ] else ...[
             const Text("Enter someone else's 4-character code to pair:"),
@@ -1927,24 +1941,9 @@ class _PaperCard extends StatelessWidget {
                   Center(
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Align(
-                        alignment: Alignment.topCenter,
-                        child: Padding(
-                          padding: const EdgeInsets.only(top: 22),
-                          child: Text(
-                            prompt,
-                            maxLines: 4,
-                            overflow: TextOverflow.ellipsis,
-                            textAlign: TextAlign.center,
-                            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                                  color: const Color(0xFFF8F8F8),
-                                  fontWeight: FontWeight.w700,
-                                  shadows: const [
-                                    Shadow(color: Color(0xCC000000), blurRadius: 8),
-                                  ],
-                                ),
-                          ),
-                        ),
+                      child: Padding(
+                        padding: const EdgeInsets.only(top: 22, bottom: 14),
+                        child: _FitPromptText(prompt: prompt),
                       ),
                     ),
                   ),
@@ -2225,7 +2224,18 @@ class _HeartRateBarPainter extends CustomPainter {
 }
 
 class _BlurMixButton extends StatelessWidget {
-  const _BlurMixButton({required this.onPressed, required this.label, this.seed});
+  const _BlurMixButton({
+    required this.onPressed,
+    required this.label,
+    this.seed,
+    this.width = _buttonWidth,
+    this.height = _buttonHeight,
+    this.fillColor = _offWhite,
+    this.borderColor = _offWhiteBorder,
+    this.textColor = _ink,
+    this.textSize = 20,
+    this.textWeight = FontWeight.w700,
+  });
 
   static const double _buttonWidth = 230;
   static const double _buttonHeight = 52;
@@ -2233,6 +2243,13 @@ class _BlurMixButton extends StatelessWidget {
   final VoidCallback? onPressed;
   final String label;
   final String? seed;
+  final double width;
+  final double height;
+  final Color fillColor;
+  final Color borderColor;
+  final Color textColor;
+  final double textSize;
+  final FontWeight textWeight;
 
   @override
   Widget build(BuildContext context) {
@@ -2246,21 +2263,21 @@ class _BlurMixButton extends StatelessWidget {
           child: Align(
             alignment: Alignment.center,
             child: Container(
-              width: _buttonWidth,
-              height: _buttonHeight,
+              width: width,
+              height: height,
               decoration: BoxDecoration(
-                color: _offWhite,
+                color: fillColor,
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: _offWhiteBorder),
+                border: Border.all(color: borderColor),
               ),
               child: Center(
                 child: Text(
                   label,
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                        color: _ink,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 20,
+                        color: textColor,
+                        fontWeight: textWeight,
+                        fontSize: textSize,
                       ),
                 ),
               ),
@@ -2269,6 +2286,63 @@ class _BlurMixButton extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+class _FitPromptText extends StatelessWidget {
+  const _FitPromptText({required this.prompt});
+
+  final String prompt;
+
+  @override
+  Widget build(BuildContext context) {
+    final baseStyle = Theme.of(context).textTheme.titleLarge?.copyWith(
+          color: const Color(0xFFF8F8F8),
+          fontWeight: FontWeight.w700,
+          shadows: const [
+            Shadow(color: Color(0xCC000000), blurRadius: 8),
+          ],
+        );
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final selectedSize = _largestFittingFontSize(
+          text: prompt,
+          maxWidth: constraints.maxWidth,
+          maxHeight: constraints.maxHeight,
+          baseStyle: baseStyle,
+        );
+        return Text(
+          prompt,
+          textAlign: TextAlign.center,
+          softWrap: true,
+          style: baseStyle?.copyWith(fontSize: selectedSize),
+        );
+      },
+    );
+  }
+
+  double _largestFittingFontSize({
+    required String text,
+    required double maxWidth,
+    required double maxHeight,
+    TextStyle? baseStyle,
+  }) {
+    const maxFont = 30.0;
+    const minFont = 12.0;
+    final painter = TextPainter(
+      textDirection: TextDirection.ltr,
+      textAlign: TextAlign.center,
+    );
+
+    for (var size = maxFont; size >= minFont; size -= 1) {
+      painter.text = TextSpan(text: text, style: baseStyle?.copyWith(fontSize: size));
+      painter.layout(maxWidth: maxWidth);
+      if (painter.size.height <= maxHeight) {
+        return size;
+      }
+    }
+
+    return minFont;
   }
 }
 
