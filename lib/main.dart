@@ -2359,12 +2359,12 @@ class _ChatGptTextureBackdrop extends StatelessWidget {
               end: Alignment.bottomCenter,
               colors: [
                 Color.alphaBlend(
-                  toneColor.withOpacity(0.32 * gradientOpacity),
-                  Colors.black.withOpacity(0.2),
+                  toneColor.withOpacity(0.24 * gradientOpacity),
+                  Colors.black.withOpacity(0.36),
                 ),
                 Color.alphaBlend(
-                  toneColor.withOpacity(0.45 * gradientOpacity),
-                  Colors.black.withOpacity(0.45),
+                  toneColor.withOpacity(0.34 * gradientOpacity),
+                  Colors.black.withOpacity(0.62),
                 ),
               ],
             ),
