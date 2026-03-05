@@ -20,6 +20,7 @@ const _offWhiteBorder = Color(0xFFE6E2D6);
 const _ink = Color(0xFF070707);
 const _backgroundImageAsset = 'assets/chat_gpt_texture.png';
 const _gameViewportSize = Size(390, 844);
+const _screenContentPadding = EdgeInsets.fromLTRB(20, 40, 20, 20);
 const _chatGptTextureAssets = [
   'assets/Polaroid1.png',
   'assets/Polaroid2.png',
@@ -109,10 +110,24 @@ class MiniApp extends StatelessWidget {
           surface: _paper,
         ),
         scaffoldBackgroundColor: Colors.transparent,
-        textTheme: Typography.blackMountainView.apply(
-          bodyColor: Colors.white,
-          displayColor: Colors.white,
-        ),
+        textTheme: Typography.blackMountainView
+            .apply(
+              bodyColor: Colors.white,
+              displayColor: Colors.white,
+              fontSizeFactor: 1.12,
+            )
+            .copyWith(
+              headlineSmall: Typography.blackMountainView.headlineSmall?.copyWith(
+                fontSize: 31,
+                fontWeight: FontWeight.w700,
+              ),
+              titleLarge: Typography.blackMountainView.titleLarge?.copyWith(
+                fontSize: 25,
+                fontWeight: FontWeight.w700,
+              ),
+              bodyLarge: Typography.blackMountainView.bodyLarge?.copyWith(fontSize: 19),
+              bodyMedium: Typography.blackMountainView.bodyMedium?.copyWith(fontSize: 18),
+            ),
         filledButtonTheme: FilledButtonThemeData(
           style: FilledButton.styleFrom(
             backgroundColor: Colors.black.withOpacity(0.34),
@@ -737,7 +752,7 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
                       width: _gameViewportSize.width,
                       height: _gameViewportSize.height,
                       child: Padding(
-                        padding: const EdgeInsets.all(20),
+                        padding: _screenContentPadding,
                         child: _buildBody(),
                       ),
                     ),
@@ -1640,7 +1655,7 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
         : (player?.currentPromptIndex ?? 0).clamp(0, prompts.length - 1);
 
     return SingleChildScrollView(
-      padding: EdgeInsets.only(top: 20, bottom: keyboardInset + 24),
+      padding: EdgeInsets.only(bottom: keyboardInset + 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
