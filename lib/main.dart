@@ -18,11 +18,13 @@ const _paper = Color(0xFFF3F3EF);
 const _offWhite = Color(0xFFF5F3EB);
 const _offWhiteBorder = Color(0xFFE6E2D6);
 const _ink = Color(0xFF070707);
-const _backgroundImageAsset = 'assets/chat_gpt_texture.png';
+const _backgroundImageAsset = 'assets/Polaroid1.png';
 const _gameViewportSize = Size(390, 844);
 const _chatGptTextureAssets = [
-  'assets/chat_gpt_texture.png',
-  'assets/chat_gpt_texture_alt.png',
+  'assets/Polaroid1.png',
+  'assets/Polaroid2.png',
+  'assets/Polaroid3.png',
+  'assets/Polaroid4.png',
 ];
 
 String _textureAssetForSeed(String seed) {
