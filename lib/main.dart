@@ -203,6 +203,7 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
   PromptCatalog? _promptCatalog;
   List<PlayerRecord> _mutualSeeAgainPlayers = const <PlayerRecord>[];
   bool _uiPreviewMode = false;
+  bool _demoMode = false;
 
   static const _previewPromptSet = [
     PromptItem(id: 'preview-1', text: 'What is one thing that made you smile this week?'),
@@ -214,6 +215,7 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
   void initState() {
     super.initState();
     _uiPreviewMode = _queryBool('preview') || _queryBool('uiPreview');
+    _demoMode = _queryBool('demo');
     _sessionId = Uri.base.queryParameters['session'] ??
         Uri.base.queryParameters['sessionId'] ??
         Uri.base.queryParameters['code'];
@@ -223,6 +225,11 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
 
     if (_uiPreviewMode) {
       _enableUiPreview();
+      return;
+    }
+
+    if (_demoMode) {
+      _enableDemoMode();
       return;
     }
 
@@ -281,6 +288,42 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
       );
     });
   }
+
+
+  void _enableDemoMode() {
+    final demoPlayer = PlayerRecord(
+      id: 'demo-player',
+      name: 'Demo User',
+      phone: '0000000000',
+      gender: '',
+      sexualPreference: '',
+      acceptedTermsAndGameTexts: true,
+      acceptedPromoTexts: false,
+      roundPreference: RoundPreference.playful,
+      inviteCode: 'DM42',
+      pairedWith: 'demo-partner',
+      pairedRound: 1,
+      currentPromptRound: 1,
+      currentPromptIndex: 0,
+      currentRoundPrompts: _previewPromptSet.map((item) => item.id).toList(),
+      askedPromptIds: _previewPromptSet.map((item) => item.id).toList(),
+    );
+
+    setState(() {
+      _sessionId = _sessionId ?? 'demo-quick-game';
+      _playerId = demoPlayer.id;
+      _player = demoPlayer;
+      _session = SessionRecord(status: 'started', round: 1);
+      _stage = Stage.game;
+      _error = null;
+      _promptCatalog = PromptCatalog(
+        sets: {'preview': _previewPromptSet},
+        itemsById: {for (final item in _previewPromptSet) item.id: item},
+      );
+    });
+  }
+
+  bool get _isLocalSandboxMode => _uiPreviewMode || _demoMode;
 
   void _setPreviewStage(Stage stage) {
     if (!_uiPreviewMode) return;
@@ -414,7 +457,7 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
   }
 
   Future<void> _handleSignup(SignupPayload payload) async {
-    if (_uiPreviewMode) {
+    if (_isLocalSandboxMode) {
       setState(() {
         _player = PlayerRecord(
           id: 'preview-player',
@@ -490,7 +533,7 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
   }
 
   void _startPolling() {
-    if (_uiPreviewMode) return;
+    if (_isLocalSandboxMode) return;
     _poller?.cancel();
     _poller = Timer.periodic(const Duration(seconds: 2), (_) async {
       if (_sessionId == null || _playerId == null || !mounted) return;
@@ -539,7 +582,7 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
   }
 
   Future<void> _submitPartnerCode(String code) async {
-    if (_uiPreviewMode) {
+    if (_isLocalSandboxMode) {
       setState(() {
         _player
           ?..pairedWith = 'preview-partner'
@@ -834,7 +877,7 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
     required int promptIndex,
     required String partnerId,
   }) async {
-    if (_uiPreviewMode) {
+    if (_isLocalSandboxMode) {
       if (_player == null) return;
       setState(() {
         _player!.currentPromptIndex = promptIndex;
