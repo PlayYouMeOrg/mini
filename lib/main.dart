@@ -18,7 +18,7 @@ const _paper = Color(0xFFF3F3EF);
 const _offWhite = Color(0xFFF5F3EB);
 const _offWhiteBorder = Color(0xFFE6E2D6);
 const _ink = Color(0xFF070707);
-const _backgroundImageAsset = 'assets/chat_gpt_texture_alt.png';
+const _backgroundImageAsset = 'assets/chat_gpt_texture.png';
 const _gameViewportSize = Size(390, 844);
 const _chatGptTextureAssets = [
   'assets/chat_gpt_texture.png',
@@ -722,7 +722,7 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
                   textureAsset: _backgroundImageAsset,
                   minScale: 3.4,
                   maxScale: 4.6,
-                  gradientOpacity: 0.16,
+                  gradientOpacity: 0.42,
                 ),
               ),
               const Positioned.fill(child: FilmOverlay()),
