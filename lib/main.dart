@@ -108,26 +108,33 @@ class MiniApp extends StatelessWidget {
         ).copyWith(
           primary: _ink,
           surface: _paper,
+          onSurface: Colors.white,
+          onPrimary: Colors.white,
         ),
         scaffoldBackgroundColor: Colors.transparent,
-        textTheme: Typography.blackMountainView
+        textTheme: Typography.whiteMountainView
             .apply(
               bodyColor: Colors.white,
               displayColor: Colors.white,
-              fontSizeFactor: 1.12,
+              fontSizeFactor: 1.24,
             )
             .copyWith(
-              headlineSmall: Typography.blackMountainView.headlineSmall?.copyWith(
-                fontSize: 31,
+              headlineSmall: Typography.whiteMountainView.headlineSmall?.copyWith(
+                fontSize: 34,
                 fontWeight: FontWeight.w700,
               ),
-              titleLarge: Typography.blackMountainView.titleLarge?.copyWith(
-                fontSize: 25,
+              titleLarge: Typography.whiteMountainView.titleLarge?.copyWith(
+                fontSize: 28,
                 fontWeight: FontWeight.w700,
               ),
-              bodyLarge: Typography.blackMountainView.bodyLarge?.copyWith(fontSize: 19),
-              bodyMedium: Typography.blackMountainView.bodyMedium?.copyWith(fontSize: 18),
+              bodyLarge: Typography.whiteMountainView.bodyLarge?.copyWith(fontSize: 21),
+              bodyMedium: Typography.whiteMountainView.bodyMedium?.copyWith(fontSize: 20),
             ),
+        primaryTextTheme: Typography.whiteMountainView.apply(
+          bodyColor: Colors.white,
+          displayColor: Colors.white,
+          fontSizeFactor: 1.24,
+        ),
         filledButtonTheme: FilledButtonThemeData(
           style: FilledButton.styleFrom(
             backgroundColor: Colors.black.withOpacity(0.34),
@@ -144,6 +151,8 @@ class MiniApp extends StatelessWidget {
         inputDecorationTheme: InputDecorationTheme(
           fillColor: _paper,
           filled: true,
+          labelStyle: const TextStyle(color: Colors.white),
+          hintStyle: const TextStyle(color: Colors.white70),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(14),
             borderSide: const BorderSide(color: _ink),
@@ -153,6 +162,7 @@ class MiniApp extends StatelessWidget {
             borderSide: const BorderSide(color: Color(0xFF1D1B1B)),
           ),
         ),
+        iconTheme: const IconThemeData(color: Colors.white),
       ),
       home: const SessionFlowPage(),
     );
