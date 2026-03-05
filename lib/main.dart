@@ -2155,8 +2155,20 @@ class _HeartRateBarPainter extends CustomPainter {
     path.lineTo(size.width - trailingSegment, baselineY);
     path.lineTo(size.width, baselineY);
 
+    void drawWave({
+      required Paint Function() paintBuilder,
+      required Rect clipRect,
+    }) {
+      if (clipRect.width <= 0) return;
+      canvas.save();
+      canvas.clipRect(clipRect);
+      canvas.drawPath(path, glowPaint);
+      canvas.drawPath(path, paintBuilder());
+      canvas.restore();
+    }
+
     canvas.save();
-    canvas.clipRect(Rect.fromLTWH(0, 0, revealX, size.height));
+    canvas.clipRect(Rect.fromLTWH(0, 0, size.width, size.height));
 
     if (textureImage != null) {
       final bounds = Offset.zero & size;
@@ -2194,6 +2206,7 @@ class _HeartRateBarPainter extends CustomPainter {
           ..style = PaintingStyle.stroke,
       );
     }
+    canvas.restore();
 
     final oldWavePaint = Paint()
       ..color = const Color(0x99EA4F6A)
