@@ -2536,12 +2536,13 @@ class FilmGrainPainter extends CustomPainter {
     ];
 
     for (var i = 0; i < bloomColors.length; i++) {
-      final phase = frame * pi * 2 + (i * pi / 2);
+      final phase = frame * pi * 2;
+      final bloomPhaseOffset = i * pi / 2;
       final center = Offset(
-        size.width * (0.2 + (i * 0.18)) + sin(phase * 0.9) * 20,
-        size.height * (0.25 + (i.isEven ? 0.1 : 0.45)) + cos(phase * 1.1) * 18,
+        size.width * (0.2 + (i * 0.18)) + sin(phase + bloomPhaseOffset) * 20,
+        size.height * (0.25 + (i.isEven ? 0.1 : 0.45)) + cos((phase * 2) + bloomPhaseOffset) * 18,
       );
-      final bloomRadius = 56 + sin(phase * 1.3) * 10;
+      final bloomRadius = 56 + sin((phase * 3) + bloomPhaseOffset) * 10;
       final bloomPaint = Paint()
         ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 26)
         ..color = bloomColors[i].withOpacity(0.12);
