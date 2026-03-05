@@ -19,5 +19,9 @@ flutter:
   assets:
     - Prompts/Dating/prompt_set_x.json
     - assets/love_quotes.json
+    - assets/Polaroid1.png
+    - assets/Polaroid2.png
+    - assets/Polaroid3.png
+    - assets/Polaroid4.png
     - assets/chat_gpt_texture.png
     - assets/chat_gpt_texture_alt.png
