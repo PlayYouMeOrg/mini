@@ -66,6 +66,10 @@
         this.current = function () {
           return boundaries[cursor] ?? -1;
         };
+
+        this.breakType = function () {
+          return 'none';
+        };
       }
 
       window.Intl.v8BreakIterator = SegmenterBreakIterator;
