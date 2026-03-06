@@ -1294,11 +1294,14 @@ class _SignupFormState extends State<SignupForm> {
       {bool phone = false}) {
     return TextFormField(
       controller: controller,
+      style: const TextStyle(color: Colors.black),
       keyboardType: phone ? TextInputType.phone : TextInputType.text,
       validator: (value) =>
           (value == null || value.trim().isEmpty) ? 'Required' : null,
       decoration: InputDecoration(
         labelText: label,
+        labelStyle: const TextStyle(color: Colors.black87),
+        floatingLabelStyle: const TextStyle(color: Colors.black),
         border: const OutlineInputBorder(),
       ),
     );
