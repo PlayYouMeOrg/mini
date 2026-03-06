@@ -266,6 +266,20 @@ class RtdbService {
     return SessionRecord.fromJson(payload);
   }
 
+  Future<void> ensureSessionOpen(String sessionId) async {
+    final resp = await http.patch(
+      _uri(_sessionBasePath(sessionId)),
+      body: jsonEncode(
+        {
+          'status': 'started',
+          'round': 1,
+          'updatedAt': DateTime.now().toIso8601String(),
+        },
+      ),
+    );
+    _throwIfNotOk(resp);
+  }
+
   Future<void> savePlayer(String sessionId, PlayerRecord player) async {
     final resp = await http.patch(
       _uri('${_sessionBasePath(sessionId)}/players/${player.id}'),
