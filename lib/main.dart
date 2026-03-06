@@ -304,12 +304,6 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
       acceptedPromoTexts: false,
       roundPreference: RoundPreference.playful,
       inviteCode: 'DM42',
-      pairedWith: 'demo-partner',
-      pairedRound: 1,
-      currentPromptRound: 1,
-      currentPromptIndex: 0,
-      currentRoundPrompts: _previewPromptSet.map((item) => item.id).toList(),
-      askedPromptIds: _previewPromptSet.map((item) => item.id).toList(),
     );
 
     setState(() {
@@ -317,13 +311,29 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
       _playerId = demoPlayer.id;
       _player = demoPlayer;
       _session = SessionRecord(status: 'started', round: 1);
-      _stage = Stage.game;
+      _stage = Stage.matching;
       _error = null;
-      _promptCatalog = PromptCatalog(
-        sets: {'preview': _previewPromptSet},
-        itemsById: {for (final item in _previewPromptSet) item.id: item},
-      );
     });
+
+    unawaited(_loadDemoPromptCatalog());
+  }
+
+  Future<void> _loadDemoPromptCatalog() async {
+    try {
+      final catalog = await _promptCatalogService.loadDatingCatalog();
+      if (!mounted) return;
+      setState(() {
+        _promptCatalog = catalog;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _promptCatalog = PromptCatalog(
+          sets: {'preview': _previewPromptSet},
+          itemsById: {for (final item in _previewPromptSet) item.id: item},
+        );
+      });
+    }
   }
 
   bool get _isLocalSandboxMode => _uiPreviewMode || _demoMode;
@@ -642,11 +652,28 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
 
   Future<void> _submitPartnerCode(String code) async {
     if (_isLocalSandboxMode) {
+      final normalized = code.trim().toUpperCase();
+      if (normalized.length < 4) {
+        setState(() {
+          _error = 'Enter a 4-character code to start.';
+        });
+        return;
+      }
+
+      final prompts = await _pickLocalRoundPrompts();
       setState(() {
         _player
           ?..pairedWith = 'preview-partner'
           ..pairedRound = _session?.round ?? 1
-          ..partnerCode = code.trim().toUpperCase();
+          ..partnerCode = normalized
+          ..currentPromptRound = _session?.round ?? 1
+          ..currentPromptIndex = 0
+          ..currentRoundPrompts = prompts.map((item) => item.id).toList()
+          ..askedPromptIds = {
+            ..._player!.askedPromptIds,
+            ...prompts.map((item) => item.id),
+          }.toList();
+        _stage = Stage.game;
         _error = null;
       });
       return;
@@ -695,6 +722,17 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
         _error = 'Failed to pair: $e';
       });
     }
+  }
+
+  Future<List<PromptItem>> _pickLocalRoundPrompts() async {
+    _promptCatalog ??= await _promptCatalogService.loadDatingCatalog();
+    final catalog = _promptCatalog!;
+    final seenIds = _player?.askedPromptIds.toSet() ?? <String>{};
+    return [
+      catalog.pickUnused('icebreakers_level1', seenIds),
+      catalog.pickUnused('activities_level1', seenIds),
+      catalog.pickUnused('dating_questions_level1', seenIds),
+    ];
   }
 
   bool _isSessionLive(String? status) =>
@@ -917,6 +955,7 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
           onDrawPrompt: _syncPromptDraw,
           promptCatalog: _promptCatalog,
           forceMatchingMode: true,
+          onRoundComplete: _isLocalSandboxMode ? _completeLocalRound : null,
         );
       case Stage.game:
         return GameView(
@@ -926,6 +965,7 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
           onSubmitCode: _submitPartnerCode,
           onDrawPrompt: _syncPromptDraw,
           promptCatalog: _promptCatalog,
+          onRoundComplete: _isLocalSandboxMode ? _completeLocalRound : null,
         );
       case Stage.ended:
         return EndedView(players: _mutualSeeAgainPlayers);
@@ -957,6 +997,21 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
     if (!mounted) return;
     setState(() {
       _player = refreshed;
+    });
+  }
+
+  void _completeLocalRound() {
+    if (!_isLocalSandboxMode || _player == null) return;
+    setState(() {
+      _player!
+        ..pairedWith = null
+        ..pairedRound = null
+        ..partnerCode = null
+        ..currentPromptIndex = 0
+        ..currentPromptRound = _session?.round ?? 1
+        ..currentRoundPrompts = const <String>[];
+      _stage = Stage.matching;
+      _error = null;
     });
   }
 
@@ -1574,6 +1629,7 @@ class GameView extends StatefulWidget {
     required this.promptCatalog,
     this.error,
     this.forceMatchingMode = false,
+    this.onRoundComplete,
   });
 
   final PlayerRecord? player;
@@ -1586,6 +1642,7 @@ class GameView extends StatefulWidget {
   final PromptCatalog? promptCatalog;
   final String? error;
   final bool forceMatchingMode;
+  final VoidCallback? onRoundComplete;
 
   @override
   State<GameView> createState() => _GameViewState();
@@ -1804,12 +1861,17 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Text(
-            'Round In Progress',
+            isPairedThisRound ? 'Open Session' : 'Find Your Match',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.headlineSmall,
           ),
           const SizedBox(height: 12),
-          Text('Round: ${currentRound?.toString() ?? '-'}', textAlign: TextAlign.center),
+          Text(
+            isPairedThisRound
+                ? 'Complete 3 prompts together, then go back to matching.'
+                : 'Enter any 4-character code to connect instantly.',
+            textAlign: TextAlign.center,
+          ),
           const SizedBox(height: 20),
           if (isPairedThisRound) ...[
             Text(
@@ -1895,11 +1957,25 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
                           ? 'Draw next card (${_nextCardCooldown}s)'
                           : 'Draw next card',
                 )
-              else
+              else ...[
                 const Text(
-                  'Round complete. Wait for next round to pair with someone new.',
+                  'All 3 prompts done — jump back to matching.',
                   textAlign: TextAlign.center,
                 ),
+                const SizedBox(height: 8),
+                _BlurMixButton(
+                  onPressed: widget.onRoundComplete,
+                  seed: 'back-to-matching',
+                  width: 220,
+                  height: 48,
+                  fillColor: Colors.transparent,
+                  borderColor: Colors.white,
+                  textColor: Colors.white,
+                  textSize: 20,
+                  textWeight: FontWeight.w800,
+                  label: 'Back to matching',
+                ),
+              ],
             ] else
               const Padding(
                 padding: EdgeInsets.only(top: 10),
@@ -1909,7 +1985,7 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
                 ),
               ),
           ] else ...[
-            const Text("Enter someone else's 4-character code to pair:"),
+            const Text('Enter any 4-character code to start:'),
             const SizedBox(height: 8),
             TextField(
               controller: _codeCtrl,
@@ -1924,7 +2000,7 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
             _BlurMixButton(
               onPressed: _submitting ? null : _submitCode,
               seed: 'pair-for-round',
-              label: _submitting ? 'Submitting...' : 'Pair for round',
+              label: _submitting ? 'Submitting...' : 'Start prompts',
             )
           ],
           if (widget.error != null) ...[
