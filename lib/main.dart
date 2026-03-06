@@ -21,6 +21,8 @@ const _ink = Color(0xFF070707);
 const _backgroundImageAsset = 'assets/chat_gpt_texture.png';
 const _gameViewportSize = Size(390, 844);
 const _screenContentPadding = EdgeInsets.fromLTRB(20, 40, 20, 20);
+const _publicSessionId = 'demo-public';
+
 const _chatGptTextureAssets = [
   'assets/Polaroid1.png',
   'assets/Polaroid2.png',
@@ -233,7 +235,8 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
       return;
     }
 
-    unawaited(_restoreSavedSession());
+    _sessionId ??= _publicSessionId;
+    unawaited(_autoJoinPublicSession());
   }
 
   bool _queryBool(String key) {
@@ -444,10 +447,66 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
     setState(() {
       _sessionId = trimmed;
       _error = null;
-      _stage = Stage.signup;
     });
 
     unawaited(_sessionStore.clear());
+    unawaited(_autoJoinPublicSession());
+  }
+
+  Future<void> _autoJoinPublicSession() async {
+    if (_sessionId == null || _isLocalSandboxMode) return;
+
+    final existing = await _sessionStore.load();
+    if (existing != null && existing.sessionId == _sessionId) {
+      await _restoreSavedSession();
+      if (_player != null) {
+        _startPolling();
+        return;
+      }
+    }
+
+    await _joinAsGuest();
+  }
+
+  Future<void> _joinAsGuest() async {
+    if (_sessionId == null) return;
+
+    final guestId = generateId();
+    final guestName = 'Guest ${guestId.substring(guestId.length - 4).toUpperCase()}';
+    final player = PlayerRecord(
+      id: guestId,
+      name: guestName,
+      phone: '',
+      gender: '',
+      sexualPreference: '',
+      acceptedTermsAndGameTexts: true,
+      acceptedPromoTexts: false,
+      roundPreference: RoundPreference.playful,
+      inviteCode: generateInviteCode(),
+    );
+
+    try {
+      await _service.ensureSessionOpen(_sessionId!);
+      await _service.savePlayer(_sessionId!, player);
+      _initialSessionStatus = 'started';
+
+      if (!mounted) return;
+      setState(() {
+        _player = player;
+        _playerId = player.id;
+        _session = SessionRecord(status: 'started', round: 1);
+        _stage = Stage.matching;
+        _error = null;
+      });
+
+      await _sessionStore.save(sessionId: _sessionId!, playerId: player.id);
+      _startPolling();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = 'Unable to join session: $e';
+      });
+    }
   }
 
   @override
@@ -838,10 +897,10 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
 
     switch (_stage) {
       case Stage.signup:
-        return SignupForm(
-          sessionId: _sessionId!,
+        return WaitingView(
+          player: _player,
+          session: _session,
           error: _error,
-          onSubmit: _handleSignup,
         );
       case Stage.waiting:
         return WaitingView(
