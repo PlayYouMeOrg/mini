@@ -21,6 +21,56 @@
   </style>
 </head>
 <body>
+  <script>
+    // Prevent use of deprecated Intl.v8BreakIterator by providing a Segmenter-backed shim.
+    (function () {
+      if (!window.Intl || typeof window.Intl.Segmenter !== 'function') {
+        return;
+      }
+
+      function SegmenterBreakIterator(locales, options) {
+        const segmenter = new window.Intl.Segmenter(locales, {
+          granularity: 'grapheme',
+          ...(options || {}),
+        });
+
+        let boundaries = [];
+        let cursor = 0;
+
+        this.adoptText = function (text) {
+          boundaries = [0];
+          cursor = 0;
+
+          for (const segment of segmenter.segment(String(text || ''))) {
+            boundaries.push(segment.index + segment.segment.length);
+          }
+
+          if (boundaries.length === 0 || boundaries[boundaries.length - 1] !== String(text || '').length) {
+            boundaries.push(String(text || '').length);
+          }
+        };
+
+        this.first = function () {
+          cursor = 0;
+          return boundaries[cursor] ?? -1;
+        };
+
+        this.next = function () {
+          if (cursor + 1 >= boundaries.length) {
+            return -1;
+          }
+          cursor += 1;
+          return boundaries[cursor];
+        };
+
+        this.current = function () {
+          return boundaries[cursor] ?? -1;
+        };
+      }
+
+      window.Intl.v8BreakIterator = SegmenterBreakIterator;
+    })();
+  </script>
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>
