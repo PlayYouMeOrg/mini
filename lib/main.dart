@@ -319,10 +319,23 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
   Future<void> _enableDemoMode() async {
     setState(() {
       _sessionId = _demoSessionId;
+      _playerId = 'demo-player';
+      _player = PlayerRecord(
+        id: 'demo-player',
+        name: 'Demo Guest',
+        phone: '',
+        gender: '',
+        sexualPreference: '',
+        acceptedTermsAndGameTexts: true,
+        acceptedPromoTexts: false,
+        roundPreference: RoundPreference.playful,
+        inviteCode: 'DEMO',
+      );
+      _session = SessionRecord(status: 'started', round: 1);
+      _stage = Stage.matching;
       _error = null;
     });
 
-    await _autoJoinPublicSession();
     unawaited(_loadDemoPromptCatalog());
   }
 
@@ -344,7 +357,7 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
     }
   }
 
-  bool get _isLocalSandboxMode => _uiPreviewMode;
+  bool get _isLocalSandboxMode => _uiPreviewMode || _demoMode;
 
   Future<bool> _isValidSessionCode(String sessionCode) async {
     final trimmed = sessionCode.trim();
@@ -502,6 +515,8 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
   Future<void> _joinAsGuest() async {
     if (_sessionId == null) return;
 
+    final sessionId = _sessionId!;
+
     final guestId = generateId();
     final guestName = 'Guest ${guestId.substring(guestId.length - 4).toUpperCase()}';
     final player = PlayerRecord(
@@ -517,24 +532,43 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
     );
 
     try {
-      await _service.ensureSessionOpen(_sessionId!);
-      await _service.savePlayer(_sessionId!, player);
-      _initialSessionStatus = 'started';
+      final session = await _service.fetchSession(sessionId);
+      final sessionStatus = session.status?.trim();
+      if (sessionStatus == null || sessionStatus.isEmpty) {
+        if (!mounted) return;
+        setState(() {
+          _sessionId = null;
+          _player = null;
+          _playerId = null;
+          _session = null;
+          _stage = Stage.signup;
+          _error = 'Session code not found. Enter a code to join.';
+        });
+        return;
+      }
+
+      await _service.savePlayer(sessionId, player);
+      _initialSessionStatus = session.status;
 
       if (!mounted) return;
       setState(() {
         _player = player;
         _playerId = player.id;
-        _session = SessionRecord(status: 'started', round: 1);
-        _stage = Stage.matching;
+        _session = session;
+        _stage = _stageForStatus(session.status);
         _error = null;
       });
 
-      await _sessionStore.save(sessionId: _sessionId!, playerId: player.id);
+      await _sessionStore.save(sessionId: sessionId, playerId: player.id);
       _startPolling();
     } catch (e) {
       if (!mounted) return;
       setState(() {
+        _sessionId = null;
+        _player = null;
+        _playerId = null;
+        _session = null;
+        _stage = Stage.signup;
         _error = 'Unable to join session: $e';
       });
     }
