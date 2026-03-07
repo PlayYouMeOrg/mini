@@ -1,6 +1,12 @@
 {
   "rules": {
-    ".read": false,
-    ".write": false
+    "mini": {
+      "sessions": {
+        "$sessionId": {
+          ".read": true,
+          ".write": true
+        }
+      }
+    }
   }
 }
