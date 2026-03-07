@@ -21,7 +21,7 @@ const _ink = Color(0xFF070707);
 const _backgroundImageAsset = 'assets/chat_gpt_texture.png';
 const _gameViewportSize = Size(390, 844);
 const _screenContentPadding = EdgeInsets.fromLTRB(20, 40, 20, 20);
-const _publicSessionId = 'demo-public';
+const _demoSessionId = 'demo-public';
 
 const _chatGptTextureAssets = [
   'assets/Polaroid1.png',
@@ -225,18 +225,41 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
       _sessionId = null;
     }
 
+    unawaited(_bootstrapFromUrlParams());
+  }
+
+  Future<void> _bootstrapFromUrlParams() async {
     if (_uiPreviewMode) {
       _enableUiPreview();
       return;
     }
 
     if (_demoMode) {
-      _enableDemoMode();
+      await _enableDemoMode();
       return;
     }
 
-    _sessionId ??= _publicSessionId;
-    unawaited(_autoJoinPublicSession());
+    final requestedSessionId = _sessionId;
+    if (requestedSessionId == null) {
+      if (!mounted) return;
+      setState(() {
+        _sessionId = null;
+      });
+      return;
+    }
+
+    final isValid = await _isValidSessionCode(requestedSessionId);
+    if (!mounted) return;
+
+    if (!isValid) {
+      setState(() {
+        _sessionId = null;
+        _error = 'Session code not found. Enter a code to join.';
+      });
+      return;
+    }
+
+    await _autoJoinPublicSession();
   }
 
   bool _queryBool(String key) {
@@ -293,28 +316,13 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
   }
 
 
-  void _enableDemoMode() {
-    final demoPlayer = PlayerRecord(
-      id: 'demo-player',
-      name: 'Demo User',
-      phone: '0000000000',
-      gender: '',
-      sexualPreference: '',
-      acceptedTermsAndGameTexts: true,
-      acceptedPromoTexts: false,
-      roundPreference: RoundPreference.playful,
-      inviteCode: 'DM42',
-    );
-
+  Future<void> _enableDemoMode() async {
     setState(() {
-      _sessionId = _sessionId ?? 'demo-quick-game';
-      _playerId = demoPlayer.id;
-      _player = demoPlayer;
-      _session = SessionRecord(status: 'started', round: 1);
-      _stage = Stage.matching;
+      _sessionId = _demoSessionId;
       _error = null;
     });
 
+    await _autoJoinPublicSession();
     unawaited(_loadDemoPromptCatalog());
   }
 
@@ -336,7 +344,20 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
     }
   }
 
-  bool get _isLocalSandboxMode => _uiPreviewMode || _demoMode;
+  bool get _isLocalSandboxMode => _uiPreviewMode;
+
+  Future<bool> _isValidSessionCode(String sessionCode) async {
+    final trimmed = sessionCode.trim();
+    if (trimmed.isEmpty) return false;
+
+    try {
+      final session = await _service.fetchSession(trimmed);
+      final status = session.status?.trim();
+      return status != null && status.isNotEmpty;
+    } catch (_) {
+      return false;
+    }
+  }
 
   void _setPreviewStage(Stage stage) {
     if (!_uiPreviewMode) return;
@@ -1106,13 +1127,13 @@ class _JoinWithCodeViewState extends State<JoinWithCodeView> {
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Text(
-                'Join with Code',
+                'Find Your Match',
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.headlineSmall,
               ),
               const SizedBox(height: 12),
               const Text(
-                'Enter your session code to join the signup flow.',
+                'Enter a valid session code to connect instantly.',
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 16),
@@ -1122,7 +1143,7 @@ class _JoinWithCodeViewState extends State<JoinWithCodeView> {
                 onSubmitted: (_) => _submit(),
                 decoration: const InputDecoration(
                   labelText: 'Session code',
-                  hintText: 'e.g. spring-mixer',
+                  hintText: 'e.g. AB12 or spring-mixer',
                   border: OutlineInputBorder(),
                 ),
               ),
@@ -1135,7 +1156,7 @@ class _JoinWithCodeViewState extends State<JoinWithCodeView> {
                 width: double.infinity,
                 child: FilledButton(
                   onPressed: _submit,
-                  child: const Text('Join session'),
+                  child: const Text('Go to matching'),
                 ),
               ),
             ],
