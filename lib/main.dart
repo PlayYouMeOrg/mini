@@ -935,9 +935,9 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
 
     switch (_stage) {
       case Stage.signup:
-        return WaitingView(
-          player: _player,
-          session: _session,
+        return SignupForm(
+          sessionId: _sessionId!,
+          onSubmit: _handleSignup,
           error: _error,
         );
       case Stage.waiting:
