@@ -2,26 +2,46 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'dart:ui';
-import 'dart:ui' as ui show Image, ImageShader, TileMode;
+import 'dart:ui' as ui show Image;
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'session_domain.dart';
+import 'session_flow_bootstrap.dart';
 
-const _creme = Color(0xFFFAFAF7);
 const _paper = Color(0xFFF3F3EF);
 const _offWhite = Color(0xFFF5F3EB);
 const _offWhiteBorder = Color(0xFFE6E2D6);
 const _ink = Color(0xFF070707);
+const _panelColor = Color(0xEAF7F1E7);
+const _panelStroke = Color(0xFFD8CCBC);
+const _primaryButton = Color(0xFF191512);
+const _secondaryButtonText = Color(0xFF2E2822);
+const _textBoxTextColor = Color(0xFF6B665E);
+const _textBoxSubtleTextColor = Color(0xFF827B73);
 const _backgroundImageAsset = 'assets/chat_gpt_texture.png';
 const _gameViewportSize = Size(390, 844);
 const _screenContentPadding = EdgeInsets.fromLTRB(20, 40, 20, 20);
 const _demoSessionId = 'demo-public';
+const _waitingQuoteCardWidth = 224.0;
+const _waitingQuoteCardHeight = 292.0;
+const _waitingQuoteCanvasWidth = 266.0;
+const _waitingQuoteCanvasHeight = 328.0;
+const _gamePromptCardWidth = 224.0;
+const _gamePromptCardHeight = 292.0;
+const _gamePromptCanvasWidth = 266.0;
+const _gamePromptCanvasHeight = 328.0;
+const _cardFlipDuration = Duration(milliseconds: 2050);
+const _cardDropDuration = Duration(milliseconds: 3000);
+const _initialInteractionRound = 1;
+const _finalInteractionRound = 2;
+const _continueVoteRound = 2;
 
 const _chatGptTextureAssets = [
   'assets/Polaroid1.png',
@@ -40,10 +60,168 @@ Color _toneColorForSeed(String seed) {
   return HSLColor.fromAHSL(1, rng.nextDouble() * 360, 0.46, 0.52).toColor();
 }
 
+TextStyle? _scaledTextStyle(
+  TextStyle? style, {
+  double scaleFactor = 1.24,
+  double? fontSize,
+  FontWeight? fontWeight,
+  Color color = _ink,
+}) {
+  if (style == null) return null;
+  return style.copyWith(
+    color: color,
+    fontSize: fontSize ??
+        (style.fontSize == null ? null : style.fontSize! * scaleFactor),
+    fontWeight: fontWeight ?? style.fontWeight,
+  );
+}
+
+TextTheme _buildAppTextTheme() {
+  final baseTextTheme = Typography.material2021(
+    platform: defaultTargetPlatform,
+  ).black;
+  return baseTextTheme.copyWith(
+    displayLarge: _scaledTextStyle(baseTextTheme.displayLarge),
+    displayMedium: _scaledTextStyle(baseTextTheme.displayMedium),
+    displaySmall: _scaledTextStyle(baseTextTheme.displaySmall),
+    headlineLarge: _scaledTextStyle(baseTextTheme.headlineLarge),
+    headlineMedium: _scaledTextStyle(baseTextTheme.headlineMedium),
+    headlineSmall: _scaledTextStyle(
+      baseTextTheme.headlineSmall,
+      fontSize: 30,
+      fontWeight: FontWeight.w700,
+    ),
+    titleLarge: _scaledTextStyle(
+      baseTextTheme.titleLarge,
+      fontSize: 24,
+      fontWeight: FontWeight.w700,
+    ),
+    titleMedium: _scaledTextStyle(baseTextTheme.titleMedium),
+    titleSmall: _scaledTextStyle(baseTextTheme.titleSmall),
+    bodyLarge: _scaledTextStyle(baseTextTheme.bodyLarge, fontSize: 18),
+    bodyMedium: _scaledTextStyle(baseTextTheme.bodyMedium, fontSize: 16),
+    bodySmall: _scaledTextStyle(baseTextTheme.bodySmall),
+    labelLarge: _scaledTextStyle(
+      baseTextTheme.labelLarge,
+      fontSize: 18,
+      fontWeight: FontWeight.w700,
+    ),
+    labelMedium: _scaledTextStyle(baseTextTheme.labelMedium),
+    labelSmall: _scaledTextStyle(baseTextTheme.labelSmall),
+  );
+}
+
+double _largestFittingFontSize({
+  required double maxWidth,
+  required double maxHeight,
+  required InlineSpan Function(double fontSize) textBuilder,
+  double maxFont = 30,
+  double minFont = 12,
+  TextAlign textAlign = TextAlign.center,
+}) {
+  if (!maxWidth.isFinite ||
+      !maxHeight.isFinite ||
+      maxWidth <= 0 ||
+      maxHeight <= 0) {
+    return minFont;
+  }
+
+  final painter = TextPainter(
+    textDirection: TextDirection.ltr,
+    textAlign: textAlign,
+  );
+
+  for (var size = maxFont; size >= minFont; size -= 1) {
+    painter.text = textBuilder(size);
+    painter.layout(maxWidth: maxWidth);
+    if (painter.size.height <= maxHeight && painter.size.width <= maxWidth) {
+      return size;
+    }
+  }
+
+  return minFont;
+}
+
+final ValueNotifier<_FatalAppError?> _fatalErrorNotifier =
+    ValueNotifier<_FatalAppError?>(null);
+
+void _logAppEvent(String message) {
+  debugPrint('[You Me] $message');
+}
+
+class _FatalAppError {
+  const _FatalAppError({
+    required this.message,
+    required this.stackTrace,
+  });
+
+  final String message;
+  final StackTrace stackTrace;
+}
+
+void _recordFatalError(
+  Object error,
+  StackTrace stackTrace, {
+  bool dumpToConsole = true,
+}) {
+  if (dumpToConsole) {
+    final details = FlutterErrorDetails(
+      exception: error,
+      stack: stackTrace,
+      library: 'you me',
+    );
+    FlutterError.dumpErrorToConsole(details, forceReport: true);
+  }
+
+  _logAppEvent('Fatal error: $error');
+  debugPrintStack(stackTrace: stackTrace);
+
+  _fatalErrorNotifier.value = _FatalAppError(
+    message: error.toString(),
+    stackTrace: stackTrace,
+  );
+}
+
+void _clearFatalError([String reason = 'manual clear']) {
+  if (_fatalErrorNotifier.value == null) return;
+  _logAppEvent('Clearing fatal error state: $reason');
+  _fatalErrorNotifier.value = null;
+}
+
 Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  await AppFirebase.initialize();
-  runApp(const MiniApp());
+  await runZonedGuarded(() async {
+    WidgetsFlutterBinding.ensureInitialized();
+    _clearFatalError('app startup');
+    _logAppEvent('main() start');
+
+    FlutterError.onError = (details) {
+      FlutterError.presentError(details);
+      _recordFatalError(
+        details.exception,
+        details.stack ?? StackTrace.current,
+        dumpToConsole: false,
+      );
+    };
+
+    PlatformDispatcher.instance.onError = (error, stackTrace) {
+      _recordFatalError(error, stackTrace);
+      return true;
+    };
+
+    ErrorWidget.builder = (details) {
+      _recordFatalError(
+        details.exception,
+        details.stack ?? StackTrace.current,
+      );
+      return const _FatalErrorFallback();
+    };
+
+    await AppFirebase.initialize();
+    _logAppEvent('Firebase configured: ${AppFirebase.isConfigured}');
+    runApp(const MiniApp());
+  }, (error, stackTrace) {
+    _recordFatalError(error, stackTrace);
+  });
 }
 
 class AppFirebase {
@@ -72,7 +250,10 @@ class AppFirebase {
     const senderId = String.fromEnvironment('FIREBASE_MESSAGING_SENDER_ID');
     const projectId = String.fromEnvironment('FIREBASE_PROJECT_ID');
 
-    if (apiKey.isEmpty || appId.isEmpty || senderId.isEmpty || projectId.isEmpty) {
+    if (apiKey.isEmpty ||
+        appId.isEmpty ||
+        senderId.isEmpty ||
+        projectId.isEmpty) {
       return null;
     }
 
@@ -101,185 +282,497 @@ class MiniApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Session Joiner',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: _ink,
-          brightness: Brightness.light,
-        ).copyWith(
-          primary: _ink,
-          surface: _paper,
-          onSurface: Colors.white,
-          onPrimary: Colors.white,
-        ),
-        scaffoldBackgroundColor: Colors.transparent,
-        textTheme: Typography.whiteMountainView
-            .apply(
-              bodyColor: Colors.white,
-              displayColor: Colors.white,
-              fontSizeFactor: 1.24,
-            )
-            .copyWith(
-              headlineSmall: Typography.whiteMountainView.headlineSmall?.copyWith(
-                fontSize: 34,
-                fontWeight: FontWeight.w700,
-              ),
-              titleLarge: Typography.whiteMountainView.titleLarge?.copyWith(
-                fontSize: 28,
-                fontWeight: FontWeight.w700,
-              ),
-              bodyLarge: Typography.whiteMountainView.bodyLarge?.copyWith(fontSize: 21),
-              bodyMedium: Typography.whiteMountainView.bodyMedium?.copyWith(fontSize: 20),
+    final appTextTheme = _buildAppTextTheme();
+    return ValueListenableBuilder<_FatalAppError?>(
+      valueListenable: _fatalErrorNotifier,
+      builder: (context, fatalError, _) {
+        return MaterialApp(
+          title: 'You Me',
+          theme: ThemeData(
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: _ink,
+              brightness: Brightness.light,
+            ).copyWith(
+              primary: _ink,
+              surface: _paper,
+              onSurface: _ink,
+              onPrimary: Colors.white,
             ),
-        primaryTextTheme: Typography.whiteMountainView.apply(
-          bodyColor: Colors.white,
-          displayColor: Colors.white,
-          fontSizeFactor: 1.24,
-        ),
-        filledButtonTheme: FilledButtonThemeData(
-          style: FilledButton.styleFrom(
-            backgroundColor: Colors.black.withOpacity(0.34),
-            foregroundColor: Colors.black,
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            side: const BorderSide(color: _offWhiteBorder),
+            scaffoldBackgroundColor: Colors.transparent,
+            textTheme: appTextTheme,
+            primaryTextTheme: appTextTheme,
+            filledButtonTheme: FilledButtonThemeData(
+              style: FilledButton.styleFrom(
+                backgroundColor: _primaryButton,
+                foregroundColor: _offWhite,
+                minimumSize: const Size(0, 50),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+              ),
+            ),
+            textButtonTheme: TextButtonThemeData(
+              style: TextButton.styleFrom(
+                foregroundColor: _secondaryButtonText,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              ),
+            ),
+            outlinedButtonTheme: OutlinedButtonThemeData(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _secondaryButtonText,
+                side: const BorderSide(color: _panelStroke),
+                minimumSize: const Size(0, 46),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+              ),
+            ),
+            inputDecorationTheme: InputDecorationTheme(
+              fillColor: const Color(0xFFF9F5ED),
+              filled: true,
+              labelStyle: const TextStyle(color: _ink),
+              floatingLabelStyle: const TextStyle(color: _ink),
+              hintStyle: const TextStyle(color: Color(0xFF5F564E)),
+              counterStyle: const TextStyle(color: _textBoxSubtleTextColor),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: const BorderSide(color: _panelStroke),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: const BorderSide(color: _panelStroke),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: const BorderSide(color: _primaryButton, width: 1.5),
+              ),
+            ),
+            iconTheme: const IconThemeData(color: _ink),
           ),
+          home: fatalError == null
+              ? const SessionFlowPage()
+              : FatalErrorPage(error: fatalError),
+        );
+      },
+    );
+  }
+}
+
+class _FatalErrorFallback extends StatelessWidget {
+  const _FatalErrorFallback();
+
+  @override
+  Widget build(BuildContext context) {
+    return Directionality(
+      textDirection: TextDirection.ltr,
+      child: _FatalErrorShell(
+        child: const Padding(
+          padding: EdgeInsets.all(24),
+          child: _FatalErrorContent(),
         ),
-        textButtonTheme: TextButtonThemeData(
-          style: TextButton.styleFrom(
-            foregroundColor: Colors.black,
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          ),
-        ),
-        outlinedButtonTheme: OutlinedButtonThemeData(
-          style: OutlinedButton.styleFrom(
-            foregroundColor: Colors.black,
-            side: const BorderSide(color: _offWhiteBorder),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          ),
-        ),
-        inputDecorationTheme: InputDecorationTheme(
-          fillColor: _paper,
-          filled: true,
-          labelStyle: const TextStyle(color: Colors.white),
-          hintStyle: const TextStyle(color: Colors.white70),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: const BorderSide(color: _ink),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: const BorderSide(color: Color(0xFF1D1B1B)),
-          ),
-        ),
-        iconTheme: const IconThemeData(color: Colors.white),
       ),
-      home: const SessionFlowPage(),
+    );
+  }
+}
+
+class FatalErrorPage extends StatelessWidget {
+  const FatalErrorPage({super.key, this.error});
+
+  final _FatalAppError? error;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: _FatalErrorShell(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: _FatalErrorContent(error: error),
+        ),
+      ),
+    );
+  }
+}
+
+class _FatalErrorShell extends StatelessWidget {
+  const _FatalErrorShell({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        const Positioned.fill(
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Color(0xFF0E151D),
+                  Color(0xFF1D2430),
+                  Color(0xFF302322),
+                ],
+              ),
+            ),
+          ),
+        ),
+        Positioned(
+          top: -80,
+          left: -40,
+          child: _ErrorGlow(
+            diameter: 220,
+            color: const Color(0xFFB46A4D).withValues(alpha: 0.28),
+          ),
+        ),
+        Positioned(
+          right: -70,
+          bottom: -30,
+          child: _ErrorGlow(
+            diameter: 260,
+            color: const Color(0xFF6C7C96).withValues(alpha: 0.22),
+          ),
+        ),
+        Center(child: child),
+      ],
+    );
+  }
+}
+
+class _ErrorGlow extends StatelessWidget {
+  const _ErrorGlow({
+    required this.diameter,
+    required this.color,
+  });
+
+  final double diameter;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: Container(
+        width: diameter,
+        height: diameter,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: color,
+        ),
+      ),
+    );
+  }
+}
+
+class _FatalErrorContent extends StatelessWidget {
+  const _FatalErrorContent({this.error, this.showDebugDetails = true});
+
+  final _FatalAppError? error;
+  final bool showDebugDetails;
+
+  @override
+  Widget build(BuildContext context) {
+    final fatalError = error ?? _fatalErrorNotifier.value;
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 420),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: const Color(0xFFF4E8D6),
+          borderRadius: BorderRadius.circular(28),
+          border: Border.all(
+            color: const Color(0xFF221C17),
+            width: 1.4,
+          ),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x33000000),
+              blurRadius: 26,
+              offset: Offset(0, 14),
+            ),
+          ],
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 26, 24, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF201A17),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: const Text(
+                  'You Me',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Color(0xFFF6EBD8),
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.8,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              const Text(
+                'Error',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Color(0xFF1D1917),
+                  fontSize: 26,
+                  height: 1.1,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 10),
+              const Text(
+                "This isn't working, it's not you, it's us.",
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Color(0xFF6F5340),
+                  fontSize: 17,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Refresh the page and try again.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Color(0xFF51453C),
+                  fontSize: 16,
+                  height: 1.35,
+                ),
+              ),
+              if (showDebugDetails && kDebugMode && fatalError != null) ...[
+                const SizedBox(height: 18),
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF9F3E8),
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(color: const Color(0xFFD8C3AA)),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: SelectableText(
+                      fatalError.message,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Color(0xFF6A5A4E),
+                        fontSize: 12,
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 18),
+              FilledButton(
+                onPressed: () => _clearFatalError('retry button'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF201A17),
+                  foregroundColor: const Color(0xFFF6EBD8),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                ),
+                child: const Text('Try again'),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
 
 enum Stage { signup, waiting, matching, game, ended }
 
+class SessionFlowServices {
+  SessionFlowServices({
+    RtdbService? rtdbService,
+    FirestoreSignupService? firestoreSignupService,
+    PromptCatalogService? promptCatalogService,
+    SessionStateStore? sessionStateStore,
+  })  : rtdbService = rtdbService ?? RtdbService(),
+        firestoreSignupService =
+            firestoreSignupService ?? FirestoreSignupService(),
+        promptCatalogService = promptCatalogService ?? PromptCatalogService(),
+        sessionStateStore = sessionStateStore ?? SessionStateStore();
+
+  final RtdbService rtdbService;
+  final FirestoreSignupService firestoreSignupService;
+  final PromptCatalogService promptCatalogService;
+  final SessionStateStore sessionStateStore;
+}
+
+class _SessionValidationResult {
+  const _SessionValidationResult.valid()
+      : isValid = true,
+        error = null;
+
+  const _SessionValidationResult.invalid()
+      : isValid = false,
+        error = null;
+
+  const _SessionValidationResult.error(this.error) : isValid = false;
+
+  final bool isValid;
+  final Object? error;
+}
+
 class SessionFlowPage extends StatefulWidget {
-  const SessionFlowPage({super.key});
+  const SessionFlowPage({
+    super.key,
+    this.initialUri,
+    this.services,
+  });
+
+  final Uri? initialUri;
+  final SessionFlowServices? services;
 
   @override
   State<SessionFlowPage> createState() => _SessionFlowPageState();
 }
 
 class _SessionFlowPageState extends State<SessionFlowPage> {
-  final _service = RtdbService();
-  final _firestoreService = FirestoreSignupService();
-  final _promptCatalogService = PromptCatalogService();
-  final _sessionStore = SessionStateStore();
+  late final RtdbService _service;
+  late final FirestoreSignupService _firestoreService;
+  late final PromptCatalogService _promptCatalogService;
+  late final SessionStateStore _sessionStore;
+  late final Uri _initialUri;
+  late final LaunchIntent _launchIntent;
 
   Stage _stage = Stage.signup;
+  ScreenState _screenState = ScreenState.booting;
   String? _sessionId;
   String? _playerId;
   PlayerRecord? _player;
   SessionRecord? _session;
   String? _error;
   Timer? _poller;
-  String? _initialSessionStatus;
+  Timer? _bootstrapWatchdog;
   PromptCatalog? _promptCatalog;
   List<PlayerRecord> _mutualSeeAgainPlayers = const <PlayerRecord>[];
-  bool _uiPreviewMode = false;
-  bool _demoMode = false;
+  bool _previewErrorMode = false;
+  String? _lastBodyLogKey;
 
   static const _previewPromptSet = [
-    PromptItem(id: 'preview-1', text: 'What is one thing that made you smile this week?'),
-    PromptItem(id: 'preview-2', text: 'If you could teleport anywhere for dinner tonight, where would you go?'),
-    PromptItem(id: 'preview-3', text: 'What kind of vibe helps you feel most yourself on a date?'),
+    PromptItem(
+        id: 'preview-1',
+        text: 'What is one thing that made you smile this week?'),
+    PromptItem(
+        id: 'preview-2',
+        text:
+            'If you could teleport anywhere for dinner tonight, where would you go?'),
+    PromptItem(
+        id: 'preview-3',
+        text: 'What kind of vibe helps you feel most yourself on a date?'),
+  ];
+
+  static const _previewLevelTwoPromptSet = [
+    PromptItem(
+        id: 'preview-4',
+        text: 'What usually makes you feel comfortable with someone quickly?'),
+    PromptItem(
+        id: 'preview-5',
+        text: 'What kind of connection are you hoping to find here tonight?'),
+    PromptItem(
+        id: 'preview-6',
+        text:
+            'What is something playful or unexpected people learn about you later?'),
   ];
 
   @override
   void initState() {
     super.initState();
-    _uiPreviewMode = _queryBool('preview') || _queryBool('uiPreview');
-    _demoMode = _queryBool('demo');
-    _sessionId = Uri.base.queryParameters['session'] ??
-        Uri.base.queryParameters['sessionId'] ??
-        Uri.base.queryParameters['code'];
-    if (_sessionId != null && _sessionId!.trim().isEmpty) {
-      _sessionId = null;
+    final services = widget.services;
+    _service = services?.rtdbService ?? RtdbService();
+    _firestoreService =
+        services?.firestoreSignupService ?? FirestoreSignupService();
+    _promptCatalogService =
+        services?.promptCatalogService ?? PromptCatalogService();
+    _sessionStore = services?.sessionStateStore ?? SessionStateStore();
+    _initialUri = widget.initialUri ?? Uri.base;
+    _launchIntent = LaunchIntent.fromUri(_initialUri);
+    _sessionId = _launchIntent.sessionId;
+
+    _logAppEvent(
+      'SessionFlow init: intent=${_launchIntent.type.name}, sessionId=${_sessionId ?? '(none)'}, query=${_initialUri.query}, fragment=${_initialUri.fragment}',
+    );
+
+    if (_launchIntent.requiresBackend) {
+      _bootstrapWatchdog = Timer(const Duration(seconds: 12), () {
+        if (!mounted || _screenState != ScreenState.booting) return;
+        _logAppEvent('Bootstrap watchdog expired');
+        _showErrorScreen(
+          'We connected to the session, but startup took too long. Please refresh and try again.',
+        );
+      });
     }
 
-    unawaited(_bootstrapFromUrlParams());
+    unawaited(_bootstrapFromLaunchIntent());
   }
 
-  Future<void> _bootstrapFromUrlParams() async {
-    if (_uiPreviewMode) {
-      _enableUiPreview();
-      return;
+  Future<void> _bootstrapFromLaunchIntent() async {
+    _logAppEvent('Bootstrap start');
+    try {
+      switch (_launchIntent.type) {
+        case LaunchIntentType.none:
+          _logAppEvent('Bootstrap -> no URL params, showing join screen');
+          _showJoinScreen();
+          return;
+        case LaunchIntentType.preview:
+          _logAppEvent('Bootstrap -> preview mode');
+          _enableUiPreview();
+          return;
+        case LaunchIntentType.demo:
+          _logAppEvent('Bootstrap -> demo mode');
+          await _enableDemoMode();
+          return;
+        case LaunchIntentType.session:
+          _logAppEvent('Bootstrap -> session link ${_launchIntent.sessionId}');
+          await _attemptSessionJoin(
+            _launchIntent.sessionId!,
+            fatalOnFailure: true,
+          );
+          return;
+      }
+    } finally {
+      _logAppEvent('Bootstrap complete');
+      _bootstrapWatchdog?.cancel();
+      if (!mounted || _screenState != ScreenState.booting) return;
+
+      _logAppEvent(
+        'Bootstrap fallback reached for intent ${_launchIntent.type.name}',
+      );
+      if (_launchIntent.requiresBackend) {
+        _showErrorScreen(
+          _error ??
+              'Unable to complete startup for this session. Please refresh and try again.',
+        );
+      } else {
+        _showJoinScreen(error: _error);
+      }
     }
-
-    if (_demoMode) {
-      await _enableDemoMode();
-      return;
-    }
-
-    final requestedSessionId = _sessionId;
-    if (requestedSessionId == null) {
-      if (!mounted) return;
-      setState(() {
-        _sessionId = null;
-      });
-      return;
-    }
-
-    final isValid = await _isValidSessionCode(requestedSessionId);
-    if (!mounted) return;
-
-    if (!isValid) {
-      setState(() {
-        _sessionId = null;
-        _error = 'Session code not found. Enter a code to join.';
-      });
-      return;
-    }
-
-    await _autoJoinPublicSession();
-  }
-
-  bool _queryBool(String key) {
-    final raw = Uri.base.queryParameters[key];
-    if (raw == null) return false;
-    final normalized = raw.trim().toLowerCase();
-    return normalized == '1' || normalized == 'true' || normalized == 'yes';
   }
 
   void _enableUiPreview() {
+    _logAppEvent('Preview mode enabled');
     final previewPlayer = PlayerRecord(
       id: 'preview-player',
-      name: 'Preview User',
+      name: 'Avery',
       phone: '0000000000',
       gender: '',
       sexualPreference: '',
       acceptedTermsAndGameTexts: true,
       acceptedPromoTexts: false,
       roundPreference: RoundPreference.playful,
-      inviteCode: 'UI42',
+      inviteCode: 'AB12',
       pairedWith: 'preview-partner',
       pairedRound: 1,
       currentPromptRound: 1,
@@ -290,11 +783,14 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
     );
 
     setState(() {
-      _sessionId = _sessionId ?? 'ui-preview';
+      _sessionId = _sessionId ?? 'AB12';
       _playerId = previewPlayer.id;
       _player = previewPlayer;
       _session = SessionRecord(status: 'started', round: 1);
       _stage = Stage.matching;
+      _screenState = ScreenState.preview;
+      _previewErrorMode = false;
+      _error = null;
       _mutualSeeAgainPlayers = [
         PlayerRecord(
           id: 'preview-match-1',
@@ -309,72 +805,182 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
         ),
       ];
       _promptCatalog = PromptCatalog(
-        sets: {'preview': _previewPromptSet},
-        itemsById: {for (final item in _previewPromptSet) item.id: item},
+        sets: {
+          'preview': _previewPromptSet,
+          'icebreakers_level2': _previewLevelTwoPromptSet,
+        },
+        itemsById: {
+          for (final item in [
+            ..._previewPromptSet,
+            ..._previewLevelTwoPromptSet
+          ])
+            item.id: item,
+        },
       );
     });
   }
-
 
   Future<void> _enableDemoMode() async {
-    setState(() {
-      _sessionId = _demoSessionId;
-      _playerId = 'demo-player';
-      _player = PlayerRecord(
-        id: 'demo-player',
-        name: 'Demo Guest',
-        phone: '',
-        gender: '',
-        sexualPreference: '',
-        acceptedTermsAndGameTexts: true,
-        acceptedPromoTexts: false,
-        roundPreference: RoundPreference.playful,
-        inviteCode: 'DEMO',
-      );
-      _session = SessionRecord(status: 'started', round: 1);
-      _stage = Stage.matching;
-      _error = null;
-    });
+    _sessionId ??= _demoSessionId;
+    _logAppEvent('Demo mode enabled for session $_sessionId');
 
-    unawaited(_loadDemoPromptCatalog());
+    try {
+      _promptCatalog ??= await _promptCatalogService.loadDatingCatalog();
+    } catch (_) {
+      _promptCatalog ??= _buildFallbackPromptCatalog();
+    }
+
+    try {
+      await _ensureBackendAuth();
+      final session = await _service.ensureSessionStarted(_sessionId!);
+      _logAppEvent(
+        'Demo session ready: status=${session.status ?? '(none)'} round=${session.round ?? '(none)'}',
+      );
+    } catch (error) {
+      _handleSessionJoinFailure(
+        _backendErrorMessage(
+          fallback: 'Unable to start demo mode.',
+          error: error,
+        ),
+        fatalOnFailure: true,
+      );
+      return;
+    }
+
+    await _attemptSessionJoin(_sessionId!, fatalOnFailure: true);
   }
 
-  Future<void> _loadDemoPromptCatalog() async {
-    try {
-      final catalog = await _promptCatalogService.loadDatingCatalog();
-      if (!mounted) return;
-      setState(() {
-        _promptCatalog = catalog;
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _promptCatalog = PromptCatalog(
-          sets: {'preview': _previewPromptSet},
-          itemsById: {for (final item in _previewPromptSet) item.id: item},
-        );
-      });
+  PromptCatalog _buildFallbackPromptCatalog() {
+    return PromptCatalog(
+      sets: {
+        'icebreakers_level1': [_previewPromptSet[0]],
+        'activities_level1': [_previewPromptSet[1]],
+        'dating_questions_level1': [_previewPromptSet[2]],
+        'icebreakers_level2': _previewLevelTwoPromptSet,
+      },
+      itemsById: {
+        for (final item in [..._previewPromptSet, ..._previewLevelTwoPromptSet])
+          item.id: item,
+      },
+    );
+  }
+
+  bool get _isLocalSandboxMode => _launchIntent.isLocal;
+
+  ScreenState _screenStateForStage(Stage stage) {
+    switch (stage) {
+      case Stage.signup:
+        return ScreenState.signup;
+      case Stage.waiting:
+        return ScreenState.waiting;
+      case Stage.matching:
+        return ScreenState.matching;
+      case Stage.game:
+        return ScreenState.game;
+      case Stage.ended:
+        return ScreenState.ended;
     }
   }
 
-  bool get _isLocalSandboxMode => _uiPreviewMode || _demoMode;
+  void _showJoinScreen({String? error}) {
+    if (!mounted) return;
+    setState(() {
+      _screenState = ScreenState.join;
+      _sessionId = null;
+      _playerId = null;
+      _player = null;
+      _session = null;
+      _previewErrorMode = false;
+      _error = error;
+    });
+  }
 
-  Future<bool> _isValidSessionCode(String sessionCode) async {
+  void _showErrorScreen(String message) {
+    if (!mounted) return;
+    setState(() {
+      _screenState = ScreenState.error;
+      _sessionId = null;
+      _playerId = null;
+      _player = null;
+      _session = null;
+      _previewErrorMode = false;
+      _error = message;
+    });
+  }
+
+  void _showStageScreen(Stage stage) {
+    _stage = stage;
+    _screenState = _screenStateForStage(stage);
+  }
+
+  void _showLocalStage(Stage stage) {
+    _stage = stage;
+    _screenState = _launchIntent.type == LaunchIntentType.preview
+        ? ScreenState.preview
+        : _screenStateForStage(stage);
+  }
+
+  String _backendErrorMessage({
+    required String fallback,
+    required Object error,
+  }) {
+    final message = error.toString();
+    final permissionDenied =
+        message.toLowerCase().contains('permission denied');
+    if (permissionDenied && !AppFirebase.isConfigured) {
+      return '$fallback Firebase web config is missing from this build, so the app cannot authenticate to the backend.';
+    }
+    return '$fallback $error';
+  }
+
+  Future<void> _ensureBackendAuth() async {
+    if (!AppFirebase.isConfigured) return;
+
+    final existingUser = FirebaseAuth.instance.currentUser;
+    if (existingUser != null) {
+      _logAppEvent('Firebase auth already available: ${existingUser.uid}');
+      await existingUser.getIdToken();
+      return;
+    }
+
+    _logAppEvent('Signing in anonymously to Firebase');
+    await FirebaseAuth.instance.signInAnonymously();
+    _logAppEvent(
+      'Anonymous Firebase auth ready: ${FirebaseAuth.instance.currentUser?.uid ?? '(missing uid)'}',
+    );
+  }
+
+  Future<_SessionValidationResult> _validateSessionCode(
+    String sessionCode,
+  ) async {
     final trimmed = sessionCode.trim();
-    if (trimmed.isEmpty) return false;
+    if (trimmed.isEmpty) {
+      return const _SessionValidationResult.invalid();
+    }
 
     try {
       final session = await _service.fetchSession(trimmed);
       final status = session.status?.trim();
-      return status != null && status.isNotEmpty;
-    } catch (_) {
-      return false;
+      if (status == null || status.isEmpty) {
+        return const _SessionValidationResult.invalid();
+      }
+      return const _SessionValidationResult.valid();
+    } catch (error) {
+      return _SessionValidationResult.error(error);
     }
   }
 
+  void _logBody(String key, String message) {
+    if (_lastBodyLogKey == key) return;
+    _lastBodyLogKey = key;
+    _logAppEvent(message);
+  }
+
   void _setPreviewStage(Stage stage) {
-    if (!_uiPreviewMode) return;
+    if (_launchIntent.type != LaunchIntentType.preview) return;
     setState(() {
+      _previewErrorMode = false;
+      _screenState = ScreenState.preview;
       _stage = stage;
       switch (stage) {
         case Stage.signup:
@@ -388,9 +994,12 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
           _player!
             ..pairedWith = null
             ..pairedRound = null
+            ..interactionRound = _initialInteractionRound
+            ..continueVoteRound = null
             ..currentPromptIndex = 0
             ..currentPromptRound = 1
-            ..currentRoundPrompts = _previewPromptSet.map((item) => item.id).toList();
+            ..currentRoundPrompts =
+                _previewPromptSet.map((item) => item.id).toList();
           _error = null;
           break;
         case Stage.matching:
@@ -399,9 +1008,12 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
           _player!
             ..pairedWith = null
             ..pairedRound = null
+            ..interactionRound = _initialInteractionRound
+            ..continueVoteRound = null
             ..currentPromptRound = 1
             ..currentPromptIndex = 0
-            ..currentRoundPrompts = _previewPromptSet.map((item) => item.id).toList();
+            ..currentRoundPrompts =
+                _previewPromptSet.map((item) => item.id).toList();
           _error = null;
           break;
         case Stage.game:
@@ -410,9 +1022,12 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
           _player!
             ..pairedWith = 'preview-partner'
             ..pairedRound = 1
+            ..interactionRound = _initialInteractionRound
+            ..continueVoteRound = null
             ..currentPromptRound = 1
             ..currentPromptIndex = 0
-            ..currentRoundPrompts = _previewPromptSet.map((item) => item.id).toList();
+            ..currentRoundPrompts =
+                _previewPromptSet.map((item) => item.id).toList();
           _error = null;
           break;
         case Stage.ended:
@@ -423,10 +1038,20 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
     });
   }
 
+  void _showPreviewError() {
+    if (_launchIntent.type != LaunchIntentType.preview) return;
+    _logAppEvent('Preview switched to error state');
+    setState(() {
+      _screenState = ScreenState.preview;
+      _previewErrorMode = true;
+      _error = null;
+    });
+  }
+
   PlayerRecord _buildPreviewPlayer() {
     return PlayerRecord(
       id: 'preview-player',
-      name: 'Preview User',
+      name: 'Avery',
       phone: '0000000000',
       gender: '',
       sexualPreference: '',
@@ -440,15 +1065,23 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
     );
   }
 
-  Future<void> _restoreSavedSession() async {
-    final initialSessionId = _sessionId;
+  Future<bool> _restoreSavedSession(String sessionId) async {
+    _logAppEvent(
+      'Attempting to restore saved session. initialSessionId=$sessionId',
+    );
 
     final savedState = await _sessionStore.load();
-    if (!mounted || savedState == null) return;
+    if (!mounted || savedState == null) {
+      _logAppEvent('No saved session found');
+      return false;
+    }
 
-    if (initialSessionId != null && initialSessionId != savedState.sessionId) {
+    if (sessionId != savedState.sessionId) {
+      _logAppEvent(
+        'Saved session mismatch. clearing saved=${savedState.sessionId} requested=$sessionId',
+      );
       await _sessionStore.clear();
-      return;
+      return false;
     }
 
     try {
@@ -458,7 +1091,7 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
         savedState.playerId,
       );
 
-      if (!mounted) return;
+      if (!mounted) return false;
 
       setState(() {
         _sessionId = savedState.sessionId;
@@ -466,7 +1099,7 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
         _session = session;
         _player = player;
         _error = null;
-        _stage = _stageForStatus(session.status);
+        _showStageScreen(_stageForSession(session, player: player));
       });
 
       if (_isSessionEnded(session.status)) {
@@ -474,51 +1107,119 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
       }
 
       _startPolling();
-    } catch (_) {
+      return true;
+    } catch (error) {
+      _logAppEvent('Failed to restore saved session. Clearing store. $error');
       await _sessionStore.clear();
+      return false;
     }
   }
 
   void _joinWithCode(String code) {
     final trimmed = code.trim();
     if (trimmed.isEmpty) {
-      setState(() {
-        _error = 'Please enter a valid session code.';
-      });
+      _showJoinScreen(error: 'Please enter a valid session code.');
       return;
     }
 
+    _logAppEvent('Manual join requested for session $trimmed');
     setState(() {
+      _screenState = ScreenState.booting;
       _sessionId = trimmed;
       _error = null;
     });
 
-    unawaited(_sessionStore.clear());
-    unawaited(_autoJoinPublicSession());
+    unawaited(_attemptSessionJoin(trimmed, fatalOnFailure: false));
   }
 
-  Future<void> _autoJoinPublicSession() async {
-    if (_sessionId == null || _isLocalSandboxMode) return;
+  Future<void> _attemptSessionJoin(
+    String sessionId, {
+    required bool fatalOnFailure,
+  }) async {
+    if (_isLocalSandboxMode) return;
+    _logAppEvent(
+      'Session join start for $sessionId (fatalOnFailure=$fatalOnFailure)',
+    );
 
-    final existing = await _sessionStore.load();
-    if (existing != null && existing.sessionId == _sessionId) {
-      await _restoreSavedSession();
-      if (_player != null) {
-        _startPolling();
-        return;
-      }
+    if (mounted) {
+      setState(() {
+        _screenState = ScreenState.booting;
+        _sessionId = sessionId;
+        _error = null;
+      });
     }
 
-    await _joinAsGuest();
+    try {
+      await _ensureBackendAuth();
+    } catch (e) {
+      _logAppEvent('Session join auth failed: $e');
+      _handleSessionJoinFailure(
+        _backendErrorMessage(
+          fallback: 'Unable to authenticate with Firebase.',
+          error: e,
+        ),
+        fatalOnFailure: fatalOnFailure,
+      );
+      return;
+    }
+
+    final validation = await _validateSessionCode(sessionId);
+    _logAppEvent(
+      'Bootstrap session validation: sessionId=$sessionId valid=${validation.isValid} error=${validation.error}',
+    );
+
+    if (validation.error != null) {
+      _handleSessionJoinFailure(
+        'Unable to connect to the session server. ${validation.error}',
+        fatalOnFailure: fatalOnFailure,
+      );
+      return;
+    }
+
+    if (!validation.isValid) {
+      _handleSessionJoinFailure(
+        'Session code not found. Open a valid invite link and try again.',
+        fatalOnFailure: fatalOnFailure,
+      );
+      return;
+    }
+
+    final restored = await _restoreSavedSession(sessionId);
+    if (restored) {
+      _logAppEvent('Restore succeeded for $sessionId');
+      return;
+    }
+
+    _logAppEvent('No reusable saved session. Joining as guest.');
+    try {
+      await _joinAsGuest(sessionId);
+    } catch (e) {
+      _logAppEvent('Guest join failed for session $sessionId: $e');
+      _handleSessionJoinFailure(
+        'Unable to join session: $e',
+        fatalOnFailure: fatalOnFailure,
+      );
+    }
   }
 
-  Future<void> _joinAsGuest() async {
-    if (_sessionId == null) return;
+  void _handleSessionJoinFailure(
+    String message, {
+    required bool fatalOnFailure,
+  }) {
+    if (fatalOnFailure) {
+      _showErrorScreen(message);
+      return;
+    }
 
-    final sessionId = _sessionId!;
+    _showJoinScreen(error: message);
+  }
+
+  Future<void> _joinAsGuest(String sessionId) async {
+    _logAppEvent('Joining as guest for session $sessionId');
 
     final guestId = generateId();
-    final guestName = 'Guest ${guestId.substring(guestId.length - 4).toUpperCase()}';
+    final guestName =
+        'Guest ${guestId.substring(guestId.length - 4).toUpperCase()}';
     final player = PlayerRecord(
       id: guestId,
       name: guestName,
@@ -531,51 +1232,34 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
       inviteCode: generateInviteCode(),
     );
 
-    try {
-      final session = await _service.fetchSession(sessionId);
-      final sessionStatus = session.status?.trim();
-      if (sessionStatus == null || sessionStatus.isEmpty) {
-        if (!mounted) return;
-        setState(() {
-          _sessionId = null;
-          _player = null;
-          _playerId = null;
-          _session = null;
-          _stage = Stage.signup;
-          _error = 'Session code not found. Enter a code to join.';
-        });
-        return;
-      }
-
-      await _service.savePlayer(sessionId, player);
-      _initialSessionStatus = session.status;
-
-      if (!mounted) return;
-      setState(() {
-        _player = player;
-        _playerId = player.id;
-        _session = session;
-        _stage = _stageForStatus(session.status);
-        _error = null;
-      });
-
-      await _sessionStore.save(sessionId: sessionId, playerId: player.id);
-      _startPolling();
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _sessionId = null;
-        _player = null;
-        _playerId = null;
-        _session = null;
-        _stage = Stage.signup;
-        _error = 'Unable to join session: $e';
-      });
+    final session = await _service.fetchSession(sessionId);
+    final sessionStatus = session.status?.trim();
+    if (sessionStatus == null || sessionStatus.isEmpty) {
+      throw StateError(
+        'Session code not found. Open a valid invite link and try again.',
+      );
     }
+
+    await _service.savePlayer(sessionId, player);
+    _logAppEvent('Guest join succeeded for session $sessionId as ${player.id}');
+
+    if (!mounted) return;
+    setState(() {
+      _sessionId = sessionId;
+      _player = player;
+      _playerId = player.id;
+      _session = session;
+      _error = null;
+      _showStageScreen(_stageForSession(session, player: player));
+    });
+
+    await _sessionStore.save(sessionId: sessionId, playerId: player.id);
+    _startPolling();
   }
 
   @override
   void dispose() {
+    _bootstrapWatchdog?.cancel();
     _poller?.cancel();
     super.dispose();
   }
@@ -583,7 +1267,7 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
   Future<void> _handleSignup(SignupPayload payload) async {
     if (_isLocalSandboxMode) {
       setState(() {
-        _player = PlayerRecord(
+        final localPlayer = PlayerRecord(
           id: 'preview-player',
           name: payload.name,
           phone: payload.phone,
@@ -594,8 +1278,10 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
           roundPreference: payload.roundPreference,
           inviteCode: 'UI42',
         );
-        _stage = Stage.waiting;
+        _player = localPlayer;
+        _playerId = localPlayer.id;
         _session = SessionRecord(status: 'waiting', round: 1);
+        _showLocalStage(Stage.waiting);
       });
       return;
     }
@@ -608,7 +1294,8 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
 
     try {
       final session = await _service.fetchSession(_sessionId!);
-      final playerId = FirebaseAuth.instance.currentUser?.uid ?? _phoneAuthPlayerId(payload.phone);
+      final playerId = FirebaseAuth.instance.currentUser?.uid ??
+          _phoneAuthPlayerId(payload.phone);
       final inviteCode = generateInviteCode();
       final signup = payload;
       final player = PlayerRecord(
@@ -629,12 +1316,11 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
         player: player,
       );
 
-      _initialSessionStatus = session.status;
       setState(() {
         _session = session;
         _player = player;
         _playerId = playerId;
-        _stage = Stage.waiting;
+        _showStageScreen(Stage.waiting);
       });
 
       await _sessionStore.save(
@@ -671,12 +1357,15 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
             (_session?.round != null && session.round != _session!.round);
         final previousPlayer = _player;
 
-        if (roundChanged && (_stage == Stage.game || _stage == Stage.matching)) {
+        if (roundChanged &&
+            (_stage == Stage.game || _stage == Stage.matching)) {
           final previousPartnerId = previousPlayer?.pairedWith;
           await _service.clearPairing(_sessionId!, _playerId!);
           player.pairedWith = null;
           player.pairedRound = null;
           player.partnerCode = null;
+          player.interactionRound = _initialInteractionRound;
+          player.continueVoteRound = null;
 
           if (previousPartnerId != null) {
             unawaited(_showRoundEndedDialog(previousPartnerId));
@@ -685,13 +1374,53 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
           }
         }
 
-        final nextStage = _stageForStatus(session.status);
+        var syncedPlayer = player;
+        if (!roundChanged &&
+            _isSessionLive(session.status) &&
+            syncedPlayer.pairedWith != null &&
+            syncedPlayer.pairedRound == session.round &&
+            syncedPlayer.continueVoteRound == _continueVoteRound &&
+            syncedPlayer.interactionRound < _finalInteractionRound &&
+            session.round != null) {
+          try {
+            final partner = await _service.fetchPlayer(
+              _sessionId!,
+              syncedPlayer.pairedWith!,
+            );
+            final advanced = await _maybeAdvanceInteractionRound(
+              me: syncedPlayer,
+              partner: partner,
+              sessionRound: session.round!,
+            );
+            if (advanced) {
+              syncedPlayer =
+                  await _service.fetchPlayer(_sessionId!, _playerId!);
+            }
+          } catch (_) {
+            // Ignore transient partner lookup failures and keep polling.
+          }
+        }
+
+        final shouldShowMeetSomeoneElseDialog =
+            _shouldShowMeetSomeoneElseDialog(
+          previousPlayer: previousPlayer,
+          currentPlayer: syncedPlayer,
+          session: session,
+          roundChanged: roundChanged,
+        );
+        final nextStage = _stageForSession(session, player: syncedPlayer);
         setState(() {
           _session = session;
-          _player = player;
+          _player = syncedPlayer;
           _error = null;
-          _stage = _stage == Stage.signup ? _stage : nextStage;
+          if (_screenState != ScreenState.signup) {
+            _showStageScreen(nextStage);
+          }
         });
+
+        if (shouldShowMeetSomeoneElseDialog) {
+          unawaited(_showMeetSomeoneElseDialog());
+        }
 
         if (_isSessionEnded(session.status)) {
           await _loadMutualSeeAgainPlayers();
@@ -721,6 +1450,8 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
           ?..pairedWith = 'preview-partner'
           ..pairedRound = _session?.round ?? 1
           ..partnerCode = normalized
+          ..interactionRound = _initialInteractionRound
+          ..continueVoteRound = null
           ..currentPromptRound = _session?.round ?? 1
           ..currentPromptIndex = 0
           ..currentRoundPrompts = prompts.map((item) => item.id).toList()
@@ -728,7 +1459,7 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
             ..._player!.askedPromptIds,
             ...prompts.map((item) => item.id),
           }.toList();
-        _stage = Stage.game;
+        _showLocalStage(Stage.game);
         _error = null;
       });
       return;
@@ -744,12 +1475,12 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
         (p) => p.id != _player!.id && p.inviteCode.toUpperCase() == normalized,
       );
 
-      final alreadyMatched =
-          _player!.matchedPlayerIds.contains(partner.id) ||
+      final alreadyMatched = _player!.matchedPlayerIds.contains(partner.id) ||
           partner.matchedPlayerIds.contains(_player!.id);
       if (alreadyMatched) {
         setState(() {
-          _error = 'You have already matched with this player in a previous round.';
+          _error =
+              'You have already matched with this player in a previous round.';
         });
         return;
       }
@@ -790,17 +1521,221 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
     ];
   }
 
+  List<PromptItem> _pickPromptBatch({
+    required PromptCatalog catalog,
+    required String setId,
+    required Set<String> usedIds,
+    int count = 3,
+  }) {
+    final options = List<PromptItem>.from(catalog.sets[setId] ?? const []);
+    if (options.isEmpty) {
+      throw StateError('Prompt set $setId is empty.');
+    }
+
+    final unused = options.where((item) => !usedIds.contains(item.id)).toList();
+    final primaryPool = unused.isNotEmpty ? unused : options;
+    primaryPool.shuffle(Random.secure());
+
+    final selected = <PromptItem>[];
+    for (final item in primaryPool) {
+      if (selected.any((existing) => existing.id == item.id)) continue;
+      selected.add(item);
+      if (selected.length == count) return selected;
+    }
+
+    final remaining = options
+        .where((item) => !selected.any((existing) => existing.id == item.id))
+        .toList()
+      ..shuffle(Random.secure());
+
+    for (final item in remaining) {
+      selected.add(item);
+      if (selected.length == count) return selected;
+    }
+
+    while (selected.length < count) {
+      selected.add(options[Random.secure().nextInt(options.length)]);
+    }
+
+    return selected;
+  }
+
+  Future<bool> _maybeAdvanceInteractionRound({
+    required PlayerRecord me,
+    required PlayerRecord partner,
+    required int sessionRound,
+  }) async {
+    if (_sessionId == null ||
+        me.pairedWith != partner.id ||
+        partner.pairedWith != me.id ||
+        me.interactionRound >= _finalInteractionRound ||
+        partner.interactionRound >= _finalInteractionRound ||
+        me.continueVoteRound != _continueVoteRound ||
+        partner.continueVoteRound != _continueVoteRound) {
+      return false;
+    }
+
+    _promptCatalog ??= await _promptCatalogService.loadDatingCatalog();
+    final catalog = _promptCatalog!;
+    final prompts = _pickPromptBatch(
+      catalog: catalog,
+      setId: 'icebreakers_level2',
+      usedIds: {
+        ...me.askedPromptIds,
+        ...partner.askedPromptIds,
+      },
+    );
+
+    final promptIds = prompts.map((item) => item.id).toList();
+    final mergedHistory = {
+      ...me.askedPromptIds,
+      ...partner.askedPromptIds,
+      ...promptIds,
+    }.toList();
+
+    await _service.updateRoundPrompts(
+      sessionId: _sessionId!,
+      playerId: me.id,
+      round: sessionRound,
+      interactionRound: _finalInteractionRound,
+      continueVoteRound: null,
+      promptEntries: promptIds,
+      askedPromptIds: mergedHistory,
+    );
+
+    await _service.updateRoundPrompts(
+      sessionId: _sessionId!,
+      playerId: partner.id,
+      round: sessionRound,
+      interactionRound: _finalInteractionRound,
+      continueVoteRound: null,
+      promptEntries: promptIds,
+      askedPromptIds: mergedHistory,
+    );
+
+    return true;
+  }
+
+  Future<void> _continueInteractionWithLevelTwoPrompts() async {
+    _promptCatalog ??= await _promptCatalogService.loadDatingCatalog();
+    final catalog = _promptCatalog!;
+
+    if (_isLocalSandboxMode) {
+      final me = _player;
+      if (me == null || me.interactionRound >= _finalInteractionRound) return;
+
+      final prompts = _pickPromptBatch(
+        catalog: catalog,
+        setId: 'icebreakers_level2',
+        usedIds: me.askedPromptIds.toSet(),
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _player!
+          ..interactionRound = _finalInteractionRound
+          ..continueVoteRound = null
+          ..currentPromptRound = _session?.round ?? 1
+          ..currentPromptIndex = 0
+          ..currentRoundPrompts = prompts.map((item) => item.id).toList()
+          ..askedPromptIds = {
+            ..._player!.askedPromptIds,
+            ...prompts.map((item) => item.id),
+          }.toList();
+        _error = null;
+      });
+      return;
+    }
+
+    if (_sessionId == null ||
+        _player == null ||
+        _player!.pairedWith == null ||
+        _session?.round == null) {
+      return;
+    }
+
+    final me = _player!;
+    if (me.interactionRound >= _finalInteractionRound) return;
+
+    await _service.setContinueVote(
+      sessionId: _sessionId!,
+      playerId: me.id,
+      continueVoteRound: _continueVoteRound,
+    );
+
+    var refreshed = await _service.fetchPlayer(_sessionId!, me.id);
+    final partnerId = refreshed.pairedWith ?? me.pairedWith;
+    if (partnerId != null) {
+      final partner = await _service.fetchPlayer(_sessionId!, partnerId);
+      await _maybeAdvanceInteractionRound(
+        me: refreshed,
+        partner: partner,
+        sessionRound: _session!.round!,
+      );
+      refreshed = await _service.fetchPlayer(_sessionId!, me.id);
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _player = refreshed;
+      _error = null;
+    });
+  }
+
+  Future<void> _endCurrentInteraction() async {
+    if (_isLocalSandboxMode) {
+      _completeLocalRound();
+      return;
+    }
+
+    if (_sessionId == null || _player == null) return;
+
+    final me = _player!;
+    final partnerId = me.pairedWith;
+    if (partnerId == null) return;
+
+    await _service.clearPairing(_sessionId!, me.id);
+    await _service.clearPairing(_sessionId!, partnerId);
+
+    final refreshed = await _service.fetchPlayer(_sessionId!, me.id);
+    if (!mounted) return;
+
+    setState(() {
+      _player = refreshed;
+      _error = null;
+      _showStageScreen(_stageForSession(_session, player: refreshed));
+    });
+  }
+
   bool _isSessionLive(String? status) =>
       status?.trim().toLowerCase() == 'started';
 
   bool _isSessionEnded(String? status) =>
       status?.trim().toLowerCase() == 'ended';
 
-  Stage _stageForStatus(String? status) {
+  bool _shouldShowMeetSomeoneElseDialog({
+    required PlayerRecord? previousPlayer,
+    required PlayerRecord currentPlayer,
+    required SessionRecord session,
+    required bool roundChanged,
+  }) {
+    final sessionRound = session.round;
+    return !roundChanged &&
+        sessionRound != null &&
+        previousPlayer != null &&
+        previousPlayer.pairedWith != null &&
+        previousPlayer.pairedRound == sessionRound &&
+        previousPlayer.interactionRound < _finalInteractionRound &&
+        previousPlayer.continueVoteRound == _continueVoteRound &&
+        currentPlayer.pairedWith == null;
+  }
+
+  Stage _stageForSession(SessionRecord? session, {PlayerRecord? player}) {
+    final status = session?.status;
     if (_isSessionLive(status)) {
-      final isPairedThisRound = _player?.pairedWith != null &&
-          _player?.pairedRound != null &&
-          _player!.pairedRound == _session?.round;
+      final isPairedThisRound = player?.pairedWith != null &&
+          player?.pairedRound != null &&
+          player!.pairedRound == session?.round;
       return isPairedThisRound ? Stage.game : Stage.matching;
     }
     if (_isSessionEnded(status)) return Stage.ended;
@@ -839,7 +1774,9 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
             ),
             FilledButton.icon(
               onPressed: () async {
-                if (_sessionId != null && _playerId != null && partnerId != null) {
+                if (_sessionId != null &&
+                    _playerId != null &&
+                    partnerId != null) {
                   await _service.setSeeAgainPreference(
                     sessionId: _sessionId!,
                     playerId: _playerId!,
@@ -852,6 +1789,25 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
               },
               icon: const Text('👍'),
               label: const Text('Yes'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _showMeetSomeoneElseDialog() async {
+    if (!mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          content: const Text('Lets meet someone else'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('OK'),
             ),
           ],
         );
@@ -891,7 +1847,8 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
       return;
     }
 
-    final partnerRefreshed = await _service.fetchPlayer(_sessionId!, partner.id);
+    final partnerRefreshed =
+        await _service.fetchPlayer(_sessionId!, partner.id);
 
     List<PromptItem> prompts;
     if (partnerRefreshed.currentPromptRound == round &&
@@ -904,11 +1861,10 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
       };
       final icebreaker = catalog.pickUnused('icebreakers_level1', seenIds);
       final activity = catalog.pickUnused('activities_level1', seenIds);
-      final finalSet =
-          me.roundPreference == RoundPreference.openingUp &&
-                  partnerRefreshed.roundPreference == RoundPreference.openingUp
-              ? 'dating_questions_level1'
-              : 'icebreakers_level2';
+      final finalSet = me.roundPreference == RoundPreference.openingUp &&
+              partnerRefreshed.roundPreference == RoundPreference.openingUp
+          ? 'dating_questions_level1'
+          : 'icebreakers_level2';
       final finalPrompt = catalog.pickUnused(finalSet, seenIds);
       prompts = [icebreaker, activity, finalPrompt];
     }
@@ -944,26 +1900,43 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
       resizeToAvoidBottomInset: false,
       body: SafeArea(
         child: LayoutBuilder(
-          builder: (context, _) => Stack(
-            children: [
-              const Positioned.fill(
-                child: _ChatGptTextureBackdrop(
-                  seed: 'main-theme-background',
-                  textureAsset: _backgroundImageAsset,
-                  minScale: 3.4,
-                  maxScale: 4.6,
-                  gradientOpacity: 0.42,
+          builder: (context, constraints) {
+            final availableWidth =
+                constraints.hasBoundedWidth && constraints.maxWidth > 0
+                    ? constraints.maxWidth
+                    : _gameViewportSize.width;
+            final availableHeight =
+                constraints.hasBoundedHeight && constraints.maxHeight > 0
+                    ? constraints.maxHeight
+                    : _gameViewportSize.height;
+            final viewportAspect =
+                _gameViewportSize.width / _gameViewportSize.height;
+
+            var contentWidth = availableWidth;
+            var contentHeight = contentWidth / viewportAspect;
+            if (contentHeight > availableHeight) {
+              contentHeight = availableHeight;
+              contentWidth = contentHeight * viewportAspect;
+            }
+
+            return Stack(
+              fit: StackFit.expand,
+              children: [
+                const Positioned.fill(
+                  child: _ChatGptTextureBackdrop(
+                    seed: 'main-theme-background',
+                    textureAsset: _backgroundImageAsset,
+                    minScale: 3.4,
+                    maxScale: 4.6,
+                    gradientOpacity: 0.42,
+                  ),
                 ),
-              ),
-              const Positioned.fill(child: FilmOverlay()),
-              Positioned.fill(
-                child: Center(
-                  child: FittedBox(
-                    fit: BoxFit.contain,
-                    alignment: Alignment.center,
+                const Positioned.fill(child: FilmOverlay()),
+                Positioned.fill(
+                  child: Center(
                     child: SizedBox(
-                      width: _gameViewportSize.width,
-                      height: _gameViewportSize.height,
+                      width: contentWidth,
+                      height: contentHeight,
                       child: Padding(
                         padding: _screenContentPadding,
                         child: _buildBody(),
@@ -971,59 +1944,165 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
                     ),
                   ),
                 ),
-              ),
-              _buildPreviewToolbar(),
-            ],
-          ),
+                _buildPreviewToolbar(),
+              ],
+            );
+          },
         ),
       ),
     );
   }
 
   Widget _buildBody() {
-    if (_sessionId == null) {
-      return JoinWithCodeView(
-        error: _error,
-        onJoin: _joinWithCode,
-      );
+    switch (_screenState) {
+      case ScreenState.booting:
+        _logBody('bootstrapping', 'Rendering bootstrap loading view');
+        return const _BootstrapLoadingView();
+      case ScreenState.error:
+        _logBody('session-error', 'Rendering session error view');
+        return _SessionFlowFatalErrorBody(
+          message: _error,
+        );
+      case ScreenState.join:
+        _logBody('join', 'Rendering join session code view');
+        return _ContentPanel(
+          child: JoinWithCodeView(
+            error: _error,
+            onJoin: _joinWithCode,
+          ),
+        );
+      case ScreenState.preview:
+        return _buildPreviewBody();
+      case ScreenState.signup:
+        _logBody('signup', 'Rendering signup view for session $_sessionId');
+        return _ContentPanel(
+          child: SignupForm(
+            sessionId: _sessionId!,
+            onSubmit: _handleSignup,
+            error: _error,
+          ),
+        );
+      case ScreenState.waiting:
+        _logBody('waiting', 'Rendering waiting view for session $_sessionId');
+        return _ContentPanel(
+          child: WaitingView(
+            player: _player,
+            session: _session,
+            error: _error,
+          ),
+        );
+      case ScreenState.matching:
+        _logBody('matching', 'Rendering matching view for session $_sessionId');
+        return _ContentPanel(
+          child: GameView(
+            player: _player,
+            session: _session,
+            error: _error,
+            onSubmitCode: _submitPartnerCode,
+            onDrawPrompt: _syncPromptDraw,
+            onContinueInteraction: _continueInteractionWithLevelTwoPrompts,
+            onEndInteraction:
+                _isLocalSandboxMode ? null : _endCurrentInteraction,
+            promptCatalog: _promptCatalog,
+            forceMatchingMode: true,
+            unpairedInstructions:
+                'Share your code, then enter someone else\'s 4-character code to start talking.',
+            codeEntryPrompt: 'Enter another person\'s 4-character code:',
+            showInviteCodeCard: true,
+            onRoundComplete: _isLocalSandboxMode ? _completeLocalRound : null,
+          ),
+        );
+      case ScreenState.game:
+        _logBody('game', 'Rendering game view for session $_sessionId');
+        return _ContentPanel(
+          child: GameView(
+            player: _player,
+            session: _session,
+            error: _error,
+            onSubmitCode: _submitPartnerCode,
+            onDrawPrompt: _syncPromptDraw,
+            onContinueInteraction: _continueInteractionWithLevelTwoPrompts,
+            onEndInteraction:
+                _isLocalSandboxMode ? null : _endCurrentInteraction,
+            promptCatalog: _promptCatalog,
+            unpairedInstructions:
+                'Share your code, then enter someone else\'s 4-character code to start talking.',
+            codeEntryPrompt: 'Enter another person\'s 4-character code:',
+            showInviteCodeCard: true,
+            onRoundComplete: _isLocalSandboxMode ? _completeLocalRound : null,
+          ),
+        );
+      case ScreenState.ended:
+        _logBody('ended', 'Rendering ended view for session $_sessionId');
+        return _ContentPanel(child: EndedView(players: _mutualSeeAgainPlayers));
+    }
+  }
+
+  Widget _buildPreviewBody() {
+    if (_previewErrorMode) {
+      _logBody('preview-error', 'Rendering preview error view');
+      return const _PreviewFatalErrorBody();
     }
 
     switch (_stage) {
       case Stage.signup:
-        return SignupForm(
-          sessionId: _sessionId!,
-          onSubmit: _handleSignup,
-          error: _error,
+        _logBody('preview-signup', 'Rendering preview signup view');
+        return _ContentPanel(
+          child: SignupForm(
+            sessionId: _sessionId ?? 'AB12',
+            onSubmit: _handleSignup,
+            error: _error,
+          ),
         );
       case Stage.waiting:
-        return WaitingView(
-          player: _player,
-          session: _session,
-          error: _error,
+        _logBody('preview-waiting', 'Rendering preview waiting view');
+        return _ContentPanel(
+          child: WaitingView(
+            player: _player,
+            session: _session,
+            error: _error,
+          ),
         );
       case Stage.matching:
-        return GameView(
-          player: _player,
-          session: _session,
-          error: _error,
-          onSubmitCode: _submitPartnerCode,
-          onDrawPrompt: _syncPromptDraw,
-          promptCatalog: _promptCatalog,
-          forceMatchingMode: true,
-          onRoundComplete: _isLocalSandboxMode ? _completeLocalRound : null,
+        _logBody('preview-matching', 'Rendering preview matching view');
+        return _ContentPanel(
+          child: GameView(
+            player: _player,
+            session: _session,
+            error: _error,
+            onSubmitCode: _submitPartnerCode,
+            onDrawPrompt: _syncPromptDraw,
+            onContinueInteraction: _continueInteractionWithLevelTwoPrompts,
+            promptCatalog: _promptCatalog,
+            forceMatchingMode: true,
+            unpairedInstructions:
+                'Enter a 4-character code to open a conversation.',
+            codeEntryPrompt: 'Enter a 4-character code:',
+            showInviteCodeCard: true,
+            onRoundComplete: _completeLocalRound,
+          ),
         );
       case Stage.game:
-        return GameView(
-          player: _player,
-          session: _session,
-          error: _error,
-          onSubmitCode: _submitPartnerCode,
-          onDrawPrompt: _syncPromptDraw,
-          promptCatalog: _promptCatalog,
-          onRoundComplete: _isLocalSandboxMode ? _completeLocalRound : null,
+        _logBody('preview-game', 'Rendering preview game view');
+        return _ContentPanel(
+          child: GameView(
+            player: _player,
+            session: _session,
+            error: _error,
+            onSubmitCode: _submitPartnerCode,
+            onDrawPrompt: _syncPromptDraw,
+            onContinueInteraction: _continueInteractionWithLevelTwoPrompts,
+            promptCatalog: _promptCatalog,
+            unpairedInstructions:
+                'Enter a 4-character code to open a conversation.',
+            codeEntryPrompt: 'Enter a 4-character code:',
+            showInviteCodeCard: true,
+            onRoundComplete: _completeLocalRound,
+          ),
         );
       case Stage.ended:
-        return EndedView(players: _mutualSeeAgainPlayers);
+        _logBody('preview-ended', 'Rendering preview ended view');
+        return _ContentPanel(child: EndedView(players: _mutualSeeAgainPlayers));
     }
   }
 
@@ -1062,23 +2141,27 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
         ..pairedWith = null
         ..pairedRound = null
         ..partnerCode = null
+        ..interactionRound = _initialInteractionRound
+        ..continueVoteRound = null
         ..currentPromptIndex = 0
         ..currentPromptRound = _session?.round ?? 1
         ..currentRoundPrompts = const <String>[];
-      _stage = Stage.matching;
+      _showLocalStage(Stage.matching);
       _error = null;
     });
   }
 
   Widget _buildPreviewToolbar() {
-    if (!_uiPreviewMode) return const SizedBox.shrink();
+    if (_launchIntent.type != LaunchIntentType.preview) {
+      return const SizedBox.shrink();
+    }
 
     return Positioned(
       right: 12,
       bottom: 12,
       child: DecoratedBox(
         decoration: BoxDecoration(
-          color: Colors.black.withOpacity(0.7),
+          color: Colors.black.withValues(alpha: 0.7),
           borderRadius: BorderRadius.circular(12),
         ),
         child: Padding(
@@ -1086,12 +2169,76 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
           child: Wrap(
             spacing: 6,
             children: [
-              _PreviewStageButton(label: 'Signup', onTap: () => _setPreviewStage(Stage.signup)),
-              _PreviewStageButton(label: 'Waiting', onTap: () => _setPreviewStage(Stage.waiting)),
-              _PreviewStageButton(label: 'Matching', onTap: () => _setPreviewStage(Stage.matching)),
-              _PreviewStageButton(label: 'Game', onTap: () => _setPreviewStage(Stage.game)),
-              _PreviewStageButton(label: 'Ended', onTap: () => _setPreviewStage(Stage.ended)),
+              _PreviewStageButton(
+                  label: 'Signup', onTap: () => _setPreviewStage(Stage.signup)),
+              _PreviewStageButton(
+                  label: 'Waiting',
+                  onTap: () => _setPreviewStage(Stage.waiting)),
+              _PreviewStageButton(
+                  label: 'Matching',
+                  onTap: () => _setPreviewStage(Stage.matching)),
+              _PreviewStageButton(label: 'Error', onTap: _showPreviewError),
+              _PreviewStageButton(
+                  label: 'Game', onTap: () => _setPreviewStage(Stage.game)),
+              _PreviewStageButton(
+                  label: 'Ended', onTap: () => _setPreviewStage(Stage.ended)),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BootstrapLoadingView extends StatelessWidget {
+  const _BootstrapLoadingView();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _HeartTimerLoader(),
+          SizedBox(height: 12),
+          Text('Connecting to session...'),
+        ],
+      ),
+    );
+  }
+}
+
+class _PreviewFatalErrorBody extends StatelessWidget {
+  const _PreviewFatalErrorBody();
+
+  @override
+  Widget build(BuildContext context) {
+    return const SingleChildScrollView(
+      padding: EdgeInsets.symmetric(horizontal: 12, vertical: 24),
+      child: Center(
+        child: _FatalErrorContent(showDebugDetails: false),
+      ),
+    );
+  }
+}
+
+class _SessionFlowFatalErrorBody extends StatelessWidget {
+  const _SessionFlowFatalErrorBody({this.message});
+
+  final String? message;
+
+  @override
+  Widget build(BuildContext context) {
+    final trimmedMessage = message?.trim();
+    return SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 24),
+      child: Center(
+        child: _FatalErrorContent(
+          error: _FatalAppError(
+            message: trimmedMessage == null || trimmedMessage.isEmpty
+                ? 'Session link is missing or invalid.'
+                : trimmedMessage,
+            stackTrace: StackTrace.empty,
           ),
         ),
       ),
@@ -1163,21 +2310,24 @@ class _JoinWithCodeViewState extends State<JoinWithCodeView> {
               Text(
                 'Find Your Match',
                 textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.headlineSmall,
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      color: _ink,
+                    ),
               ),
               const SizedBox(height: 12),
               const Text(
-                'Enter a valid session code to connect instantly.',
+                'Enter your session code to join the room.',
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 16),
               TextField(
                 controller: _codeCtrl,
+                style: const TextStyle(color: _ink),
                 textInputAction: TextInputAction.done,
                 onSubmitted: (_) => _submit(),
                 decoration: const InputDecoration(
                   labelText: 'Session code',
-                  hintText: 'e.g. AB12 or spring-mixer',
+                  hintText: 'AB12',
                   border: OutlineInputBorder(),
                 ),
               ),
@@ -1190,7 +2340,7 @@ class _JoinWithCodeViewState extends State<JoinWithCodeView> {
                 width: double.infinity,
                 child: FilledButton(
                   onPressed: _submit,
-                  child: const Text('Go to matching'),
+                  child: const Text('Continue'),
                 ),
               ),
             ],
@@ -1221,6 +2371,7 @@ class _SignupFormState extends State<SignupForm> {
   final _formKey = GlobalKey<FormState>();
   final _nameCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
+  late final TapGestureRecognizer _termsRecognizer;
   bool _acceptedTermsAndGameTexts = false;
   bool _acceptedPromoTexts = false;
   bool _showTermsValidationError = false;
@@ -1232,7 +2383,14 @@ class _SignupFormState extends State<SignupForm> {
       Uri.parse('https://playyoume.com/termsandconditions');
 
   @override
+  void initState() {
+    super.initState();
+    _termsRecognizer = TapGestureRecognizer()..onTap = _openTermsAndConditions;
+  }
+
+  @override
   void dispose() {
+    _termsRecognizer.dispose();
     _nameCtrl.dispose();
     _phoneCtrl.dispose();
     super.dispose();
@@ -1249,7 +2407,8 @@ class _SignupFormState extends State<SignupForm> {
 
     if (!AppFirebase.isConfigured) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Phone authentication is not configured yet.')),
+        const SnackBar(
+            content: Text('Phone verification is not configured yet.')),
       );
       return;
     }
@@ -1257,7 +2416,8 @@ class _SignupFormState extends State<SignupForm> {
     setState(() => _verifyingPhone = true);
     try {
       if (kIsWeb) {
-        final confirmation = await FirebaseAuth.instance.signInWithPhoneNumber(phone);
+        final confirmation =
+            await FirebaseAuth.instance.signInWithPhoneNumber(phone);
         final codeCtrl = TextEditingController();
         final smsCode = await showDialog<String>(
           context: context,
@@ -1265,19 +2425,25 @@ class _SignupFormState extends State<SignupForm> {
             title: const Text('Enter verification code'),
             content: TextField(
               controller: codeCtrl,
+              style: const TextStyle(color: _textBoxTextColor),
               keyboardType: TextInputType.number,
               decoration: const InputDecoration(labelText: 'SMS code'),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-              FilledButton(onPressed: () => Navigator.pop(context, codeCtrl.text.trim()), child: const Text('Verify')),
+              TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel')),
+              FilledButton(
+                  onPressed: () => Navigator.pop(context, codeCtrl.text.trim()),
+                  child: const Text('Verify')),
             ],
           ),
         );
         if (smsCode == null || smsCode.isEmpty) return;
         await confirmation.confirm(smsCode);
       } else {
-        throw UnimplementedError('Phone auth flow is currently implemented for web in this build.');
+        throw UnimplementedError(
+            'Phone verification is currently available on web in this build.');
       }
       if (!mounted) return;
       setState(() => _phoneVerified = true);
@@ -1351,24 +2517,28 @@ class _SignupFormState extends State<SignupForm> {
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Text(
-              'Join session ${widget.sessionId}',
+              'Join YouMe',
               textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.headlineSmall,
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    color: _ink,
+                  ),
             ),
             const SizedBox(height: 12),
             const Text(
-              'Sign up and authenticate to enter the game round queue.',
+              'Add your details so we can place you in the next round.',
               textAlign: TextAlign.center,
+              style: TextStyle(color: _ink),
             ),
             const SizedBox(height: 24),
             _input(_nameCtrl, 'Name'),
             const SizedBox(height: 12),
-            _input(_phoneCtrl, 'Phone number (Google authentication)', phone: true),
+            _input(_phoneCtrl, 'Phone number', phone: true),
             const SizedBox(height: 10),
             _BlurMixButton(
               onPressed: _verifyingPhone ? null : _verifyPhoneWithGoogle,
               seed: 'verify-phone-number',
-              label: _phoneVerified ? 'Phone verified' : 'Verify phone number',
+              width: double.infinity,
+              label: _phoneVerified ? 'Phone verified' : 'Verify phone',
             ),
             const SizedBox(height: 12),
             Row(
@@ -1392,22 +2562,28 @@ class _SignupFormState extends State<SignupForm> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const SizedBox(height: 12),
-                      Wrap(
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        children: [
-                          const Text('I agree to the '),
-                          GestureDetector(
-                            onTap: _openTermsAndConditions,
-                            child: const Text(
-                              'Terms and Conditions',
-                              style: TextStyle(
+                      Text.rich(
+                        TextSpan(
+                          style: const TextStyle(
+                            color: _ink,
+                            fontSize: 14,
+                            height: 1.2,
+                          ),
+                          children: [
+                            const TextSpan(text: 'I agree to the '),
+                            TextSpan(
+                              text: 'Terms and Conditions',
+                              recognizer: _termsRecognizer,
+                              style: const TextStyle(
+                                color: _ink,
+                                fontSize: 14,
                                 decoration: TextDecoration.underline,
                                 fontWeight: FontWeight.w600,
                               ),
                             ),
-                          ),
-                          const Text(' and to receive required game texts.'),
-                        ],
+                          ],
+                        ),
+                        textAlign: TextAlign.start,
                       ),
                     ],
                   ),
@@ -1438,7 +2614,14 @@ class _SignupFormState extends State<SignupForm> {
                 const Expanded(
                   child: Padding(
                     padding: EdgeInsets.only(top: 12),
-                    child: Text('I agree to receive promotional text messages.'),
+                    child: Text(
+                      'I agree to receive promotional text messages.',
+                      style: TextStyle(
+                        color: _ink,
+                        fontSize: 14,
+                        height: 1.2,
+                      ),
+                    ),
                   ),
                 ),
               ],
@@ -1451,7 +2634,8 @@ class _SignupFormState extends State<SignupForm> {
             _BlurMixButton(
               onPressed: _submitting ? null : _submit,
               seed: 'signup-and-authenticate',
-              label: _submitting ? 'Signing up...' : 'Sign up and authenticate',
+              width: double.infinity,
+              label: _submitting ? 'Joining...' : 'Join the session',
             ),
           ],
         ),
@@ -1463,14 +2647,17 @@ class _SignupFormState extends State<SignupForm> {
       {bool phone = false}) {
     return TextFormField(
       controller: controller,
-      style: const TextStyle(color: Colors.black),
+      style: const TextStyle(color: _ink),
       keyboardType: phone ? TextInputType.phone : TextInputType.text,
       validator: (value) =>
           (value == null || value.trim().isEmpty) ? 'Required' : null,
       decoration: InputDecoration(
+        isDense: true,
         labelText: label,
-        labelStyle: const TextStyle(color: Colors.black87),
-        floatingLabelStyle: const TextStyle(color: Colors.black),
+        labelStyle: const TextStyle(color: _ink),
+        floatingLabelStyle: const TextStyle(color: _ink),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         border: const OutlineInputBorder(),
       ),
     );
@@ -1548,7 +2735,7 @@ class _WaitingViewState extends State<WaitingView>
     super.initState();
     _flipController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 550),
+      duration: _cardFlipDuration,
       value: 1,
     );
     _flipAnimation = CurvedAnimation(
@@ -1557,10 +2744,11 @@ class _WaitingViewState extends State<WaitingView>
     );
     _dropController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 6000),
+      duration: _cardDropDuration,
       value: 1,
     );
-    _dropCurve = CurvedAnimation(parent: _dropController, curve: Curves.easeOutQuart);
+    _dropCurve =
+        CurvedAnimation(parent: _dropController, curve: Curves.easeOutQuart);
     _dropYOffset = TweenSequence<double>([
       TweenSequenceItem(
         tween: Tween(begin: -220.0, end: -8.0)
@@ -1623,7 +2811,9 @@ class _WaitingViewState extends State<WaitingView>
         Text(
           'Waiting Room',
           textAlign: TextAlign.center,
-          style: Theme.of(context).textTheme.headlineSmall,
+          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                color: _ink,
+              ),
         ),
         const SizedBox(height: 16),
         FutureBuilder<LoveQuote>(
@@ -1631,29 +2821,40 @@ class _WaitingViewState extends State<WaitingView>
           builder: (context, snapshot) {
             final hasQuote = snapshot.hasData;
             final quote = snapshot.data;
+            final quoteCard = _QuotePromptCard(
+              width: _waitingQuoteCardWidth,
+              height: _waitingQuoteCardHeight,
+              quote: hasQuote
+                  ? '“${quote!.quote}”'
+                  : 'Finding a quote for the room...',
+              author: hasQuote ? '- ${quote!.author}' : '',
+              seed: hasQuote ? quote!.quote : 'loading-quote',
+            );
             return Center(
               child: SizedBox(
-                width: 290,
-                height: 370,
+                width: _waitingQuoteCanvasWidth,
+                height: _waitingQuoteCanvasHeight,
                 child: AnimatedBuilder(
-                  animation: Listenable.merge([_flipAnimation, _dropController]),
-                  builder: (context, _) {
+                  animation:
+                      Listenable.merge([_flipAnimation, _dropController]),
+                  child: quoteCard,
+                  builder: (context, child) {
                     final tilt = pi * (1 - _flipAnimation.value);
                     return Transform(
                       alignment: Alignment.center,
                       transform: Matrix4.identity()
                         ..setEntry(3, 2, 0.001)
-                        ..translate(_dropXOffset.value, _dropYOffset.value)
+                        ..translateByDouble(
+                          _dropXOffset.value,
+                          _dropYOffset.value,
+                          0,
+                          1,
+                        )
                         ..rotateZ(_dropRotation.value)
-                        ..scale(_dropScale.value)
+                        ..scaleByDouble(
+                            _dropScale.value, _dropScale.value, 1, 1)
                         ..rotateY(tilt),
-                      child: _QuotePromptCard(
-                        width: 240,
-                        height: 330,
-                        quote: hasQuote ? '“${quote!.quote}”' : 'Pulling a quote for you…',
-                        author: hasQuote ? '- ${quote!.author}' : '',
-                        seed: hasQuote ? quote!.quote : 'loading-quote',
-                      ),
+                      child: child,
                     );
                   },
                 ),
@@ -1664,7 +2865,12 @@ class _WaitingViewState extends State<WaitingView>
         const SizedBox(height: 28),
         const Center(child: _HeartTimerLoader()),
         const SizedBox(height: 12),
-        const Center(child: Text('Waiting for the session to start')),
+        const Center(
+          child: Text(
+            'We are getting the next round ready.',
+            style: TextStyle(color: _ink),
+          ),
+        ),
         if (widget.error != null) ...[
           const SizedBox(height: 12),
           Text(widget.error!, style: const TextStyle(color: Colors.red)),
@@ -1681,9 +2887,14 @@ class GameView extends StatefulWidget {
     required this.session,
     required this.onSubmitCode,
     required this.onDrawPrompt,
+    required this.onContinueInteraction,
     required this.promptCatalog,
+    required this.unpairedInstructions,
+    required this.codeEntryPrompt,
+    this.onEndInteraction,
     this.error,
     this.forceMatchingMode = false,
+    this.showInviteCodeCard = false,
     this.onRoundComplete,
   });
 
@@ -1694,20 +2905,29 @@ class GameView extends StatefulWidget {
     required int promptIndex,
     required String partnerId,
   }) onDrawPrompt;
+  final Future<void> Function() onContinueInteraction;
+  final Future<void> Function()? onEndInteraction;
   final PromptCatalog? promptCatalog;
+  final String unpairedInstructions;
+  final String codeEntryPrompt;
   final String? error;
   final bool forceMatchingMode;
+  final bool showInviteCodeCard;
   final VoidCallback? onRoundComplete;
 
   @override
   State<GameView> createState() => _GameViewState();
 }
 
+enum _InteractionDecision { keepGoing, endInteraction }
+
 class _GameViewState extends State<GameView> with TickerProviderStateMixin {
   final _codeCtrl = TextEditingController();
   bool _submitting = false;
+  bool _interactionEnded = false;
   int? _seenRound;
   int _animatedPromptIndex = 0;
+  String? _shownInstructionsKey;
   Timer? _nextCardTimer;
   int _nextCardCooldown = 0;
 
@@ -1732,12 +2952,18 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
     final wasPairedThisRound = oldWidget.player?.pairedWith != null &&
         oldWidget.player?.pairedRound != null &&
         oldWidget.player!.pairedRound == oldRound;
-    final prompts = widget.promptCatalog?.resolveIds(widget.player?.currentRoundPrompts ?? const <String>[]) ?? const <PromptItem>[];
-    final hadPrompts = (oldWidget.promptCatalog?.resolveIds(oldWidget.player?.currentRoundPrompts ?? const <String>[]) ?? const <PromptItem>[]).isNotEmpty;
+    final prompts = widget.promptCatalog?.resolveIds(
+            widget.player?.currentRoundPrompts ?? const <String>[]) ??
+        const <PromptItem>[];
+    final hadPrompts = (oldWidget.promptCatalog?.resolveIds(
+                oldWidget.player?.currentRoundPrompts ?? const <String>[]) ??
+            const <PromptItem>[])
+        .isNotEmpty;
 
     if (round != _seenRound) {
       _seenRound = round;
       _animatedPromptIndex = 0;
+      _interactionEnded = false;
       _restartNextCardCooldown();
       if (isPairedThisRound && prompts.isNotEmpty) {
         _playCardDropAnimation();
@@ -1747,13 +2973,19 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
     final promptIndex = widget.player?.currentPromptIndex ?? 0;
     if (promptIndex != _animatedPromptIndex) {
       _animatedPromptIndex = promptIndex;
+      _interactionEnded = false;
       _playCardDropAnimation();
       _restartNextCardCooldown();
     }
 
-    if (isPairedThisRound && prompts.isNotEmpty && (!wasPairedThisRound || !hadPrompts)) {
+    if (isPairedThisRound &&
+        prompts.isNotEmpty &&
+        (!wasPairedThisRound || !hadPrompts)) {
+      _interactionEnded = false;
       _playCardDropAnimation();
     }
+
+    _scheduleRoundInstructionsIfNeeded();
   }
 
   @override
@@ -1761,7 +2993,7 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
     super.initState();
     _flipController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 550),
+      duration: _cardFlipDuration,
       value: 1,
     );
     _flipAnimation = CurvedAnimation(
@@ -1770,10 +3002,11 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
     );
     _dropController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 6000),
+      duration: _cardDropDuration,
       value: 1,
     );
-    _dropCurve = CurvedAnimation(parent: _dropController, curve: Curves.easeOutQuart);
+    _dropCurve =
+        CurvedAnimation(parent: _dropController, curve: Curves.easeOutQuart);
     _dropYOffset = TweenSequence<double>([
       TweenSequenceItem(
         tween: Tween(begin: -220.0, end: -8.0)
@@ -1814,6 +3047,130 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
         .chain(CurveTween(curve: Curves.easeOutCubic))
         .animate(_dropCurve);
     _restartNextCardCooldown();
+    _scheduleRoundInstructionsIfNeeded();
+  }
+
+  String? _instructionKeyForCurrentRound() {
+    if (widget.forceMatchingMode) return null;
+
+    final player = widget.player;
+    final round = widget.session?.round;
+    if (player == null ||
+        round == null ||
+        player.pairedWith == null ||
+        player.pairedRound == null ||
+        player.pairedRound != round) {
+      return null;
+    }
+
+    return '${player.id}:${player.pairedWith}:$round';
+  }
+
+  bool _shouldShowFirstMatchInstructions() {
+    final player = widget.player;
+    if (player == null || player.pairedWith == null) return false;
+
+    // The current partner is added to matchedPlayerIds when a pairing is saved.
+    // A length of 0 is kept for local preview flows, so both 0 and 1 mean
+    // "this is effectively the first match".
+    return player.matchedPlayerIds.length <= 1;
+  }
+
+  void _scheduleRoundInstructionsIfNeeded() {
+    final instructionKey = _instructionKeyForCurrentRound();
+    if (instructionKey == null ||
+        !_shouldShowFirstMatchInstructions() ||
+        _shownInstructionsKey == instructionKey ||
+        !mounted) {
+      return;
+    }
+
+    _shownInstructionsKey = instructionKey;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(_showRoundInstructionsDialog());
+    });
+  }
+
+  Future<void> _showRoundInstructionsDialog() async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        final mediaQuery = MediaQuery.of(context);
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding:
+              const EdgeInsets.symmetric(horizontal: 18, vertical: 24),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: 360,
+              maxHeight: mediaQuery.size.height * 0.78,
+            ),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: const Color(0xFFF9F5ED),
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: _panelStroke),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'This round',
+                      style: TextStyle(
+                        color: _ink,
+                        fontSize: 24,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Flexible(
+                      child: SingleChildScrollView(
+                        child: const Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Complete three prompts together, then wait for the next round to begin.',
+                              style: TextStyle(color: _ink, height: 1.35),
+                            ),
+                            SizedBox(height: 10),
+                            Text(
+                              'Take turns reading each card out loud and answer before moving on.',
+                              style: TextStyle(color: _ink, height: 1.35),
+                            ),
+                            SizedBox(height: 10),
+                            Text(
+                              'Tap Next prompt only when both of you are ready.',
+                              style: TextStyle(color: _ink, height: 1.35),
+                            ),
+                            SizedBox(height: 10),
+                            Text(
+                              'If the prompts do not load right away, ask the other person to enter your code too.',
+                              style: TextStyle(color: _ink, height: 1.35),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        child: const Text('Got it'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
   }
 
   void _playCardDropAnimation() {
@@ -1837,10 +3194,12 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
   void _restartNextCardCooldown() {
     _nextCardTimer?.cancel();
     final player = widget.player;
-    final prompts = widget.promptCatalog?.resolveIds(player?.currentRoundPrompts ?? const <String>[]) ?? const <PromptItem>[];
-    final hasNextCard = player != null && player.currentPromptIndex < prompts.length - 1;
+    final prompts = widget.promptCatalog
+            ?.resolveIds(player?.currentRoundPrompts ?? const <String>[]) ??
+        const <PromptItem>[];
+    final hasPromptAction = player != null && prompts.isNotEmpty;
 
-    if (!hasNextCard) {
+    if (!hasPromptAction) {
       if (_nextCardCooldown != 0 && mounted) {
         setState(() => _nextCardCooldown = 0);
       }
@@ -1872,7 +3231,9 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
 
   Future<void> _drawNextPrompt() async {
     final player = widget.player;
-    final prompts = widget.promptCatalog?.resolveIds(player?.currentRoundPrompts ?? const <String>[]) ?? const <PromptItem>[];
+    final prompts = widget.promptCatalog
+            ?.resolveIds(player?.currentRoundPrompts ?? const <String>[]) ??
+        const <PromptItem>[];
     final currentRound = widget.session?.round;
     if (player == null ||
         player.pairedWith == null ||
@@ -1896,6 +3257,139 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
     }
   }
 
+  bool _isWaitingForPartnerDecision() {
+    final player = widget.player;
+    final currentRound = widget.session?.round;
+    return !widget.forceMatchingMode &&
+        player != null &&
+        player.pairedWith != null &&
+        player.pairedRound == currentRound &&
+        player.interactionRound < _finalInteractionRound &&
+        player.continueVoteRound == _continueVoteRound;
+  }
+
+  Future<void> _handleEndInteraction() async {
+    if (_isWaitingForPartnerDecision()) return;
+
+    final canContinue =
+        (widget.player?.interactionRound ?? _initialInteractionRound) <
+            _finalInteractionRound;
+    final decision = await showDialog<_InteractionDecision>(
+      context: context,
+      builder: (context) {
+        final mediaQuery = MediaQuery.of(context);
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding:
+              const EdgeInsets.symmetric(horizontal: 18, vertical: 24),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: 360,
+              maxHeight: mediaQuery.size.height * 0.72,
+            ),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: const Color(0xFFF9F5ED),
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: _panelStroke),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      canContinue ? 'End interaction?' : 'This was round 2',
+                      style: const TextStyle(
+                        color: _ink,
+                        fontSize: 24,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Flexible(
+                      child: SingleChildScrollView(
+                        child: Text(
+                          canContinue
+                              ? 'If you both tap keep going, round 2 will unlock.'
+                              : 'Round 2 is the last round. Finish when you are ready.',
+                          style: const TextStyle(color: _ink, height: 1.35),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    if (canContinue) ...[
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton(
+                          onPressed: () => Navigator.of(
+                            context,
+                          ).pop(_InteractionDecision.keepGoing),
+                          child: const Text('Keep going'),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
+                    SizedBox(
+                      width: double.infinity,
+                      child: canContinue
+                          ? OutlinedButton(
+                              onPressed: () => Navigator.of(
+                                context,
+                              ).pop(_InteractionDecision.endInteraction),
+                              child: const Text('End interaction'),
+                            )
+                          : FilledButton(
+                              onPressed: () => Navigator.of(
+                                context,
+                              ).pop(_InteractionDecision.endInteraction),
+                              child: const Text('Finish interaction'),
+                            ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+
+    if (!mounted || decision == null) return;
+
+    switch (decision) {
+      case _InteractionDecision.keepGoing:
+        setState(() => _submitting = true);
+        try {
+          await widget.onContinueInteraction();
+        } finally {
+          if (mounted) {
+            setState(() => _submitting = false);
+          }
+        }
+        return;
+      case _InteractionDecision.endInteraction:
+        if (widget.onEndInteraction != null) {
+          setState(() => _submitting = true);
+          try {
+            await widget.onEndInteraction!();
+          } finally {
+            if (mounted) {
+              setState(() => _submitting = false);
+            }
+          }
+        } else if (widget.onRoundComplete != null) {
+          widget.onRoundComplete!();
+        } else if (mounted) {
+          setState(() {
+            _interactionEnded = true;
+          });
+        }
+        return;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
@@ -1905,10 +3399,32 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
         player?.pairedWith != null &&
         player?.pairedRound != null &&
         player!.pairedRound == currentRound;
-    final prompts = widget.promptCatalog?.resolveIds(player?.currentRoundPrompts ?? const <String>[]) ?? const <PromptItem>[];
+    final prompts = widget.promptCatalog
+            ?.resolveIds(player?.currentRoundPrompts ?? const <String>[]) ??
+        const <PromptItem>[];
     final promptIndex = prompts.isEmpty
         ? 0
         : (player?.currentPromptIndex ?? 0).clamp(0, prompts.length - 1);
+    final hasMorePrompts =
+        prompts.isNotEmpty && promptIndex < prompts.length - 1;
+    final interactionRound =
+        player?.interactionRound ?? _initialInteractionRound;
+    final isFinalInteractionRound = interactionRound >= _finalInteractionRound;
+    final waitingForPartnerDecision =
+        isPairedThisRound && _isWaitingForPartnerDecision();
+    final endInteractionLabel = waitingForPartnerDecision
+        ? 'Waiting for them...'
+        : isFinalInteractionRound
+            ? 'Finish interaction'
+            : 'End interaction';
+    final activePromptCard = prompts.isEmpty
+        ? null
+        : _PaperCard(
+            width: _gamePromptCardWidth,
+            height: _gamePromptCardHeight,
+            prompt: prompts[promptIndex].text,
+            seed: '${prompts[promptIndex].id}-$promptIndex-${player?.id ?? ''}',
+          );
 
     return SingleChildScrollView(
       padding: EdgeInsets.only(bottom: keyboardInset + 24),
@@ -1916,69 +3432,73 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Text(
-            isPairedThisRound ? 'Open Session' : 'Find Your Match',
+            isPairedThisRound ? 'YouMe' : 'Find Your Match',
             textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.headlineSmall,
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  color: _ink,
+                ),
           ),
           const SizedBox(height: 12),
-          Text(
-            isPairedThisRound
-                ? 'Complete 3 prompts together, then go back to matching.'
-                : 'Enter any 4-character code to connect instantly.',
-            textAlign: TextAlign.center,
-          ),
+          if (!isPairedThisRound)
+            Text(
+              widget.unpairedInstructions,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: _ink),
+            ),
           const SizedBox(height: 20),
           if (isPairedThisRound) ...[
-            Text(
-              'Prompt ${prompts.isEmpty ? 0 : (promptIndex + 1)} of ${prompts.length}',
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 12),
             if (prompts.isNotEmpty) ...[
               Center(
                 child: SizedBox(
-                  width: 290,
-                  height: 370,
+                  width: _gamePromptCanvasWidth,
+                  height: _gamePromptCanvasHeight,
                   child: Stack(
                     clipBehavior: Clip.none,
                     children: [
-                      for (var i = 0; i < (promptIndex > 2 ? 2 : promptIndex); i++)
-                        Positioned(
-                          left: 26 + (i * 8),
-                          top: 10 + (i * 10),
-                          child: Transform.rotate(
-                            angle: -0.045 + (i * 0.03),
-                            child: _PaperCard(
-                              width: 240,
-                              height: 330,
-                              prompt: prompts[promptIndex - i - 1].text,
-                              seed:
-                                  '${prompts[promptIndex - i - 1].id}-${promptIndex - i - 1}-${player?.id ?? ''}',
+                      for (var i = 0;
+                          i < (promptIndex > 2 ? 2 : promptIndex);
+                          i++)
+                        Center(
+                          child: Transform.translate(
+                            offset: Offset(-8 + (i * 8), 8 + (i * 10)),
+                            child: Transform.rotate(
+                              angle: -0.045 + (i * 0.03),
+                              child: _PaperCard(
+                                width: _gamePromptCardWidth,
+                                height: _gamePromptCardHeight,
+                                prompt: prompts[promptIndex - i - 1].text,
+                                seed:
+                                    '${prompts[promptIndex - i - 1].id}-${promptIndex - i - 1}-${player.id}',
+                              ),
                             ),
                           ),
                         ),
                       AnimatedBuilder(
-                        animation: Listenable.merge([_flipAnimation, _dropController]),
-                        builder: (context, _) {
+                        animation:
+                            Listenable.merge([_flipAnimation, _dropController]),
+                        child: activePromptCard,
+                        builder: (context, child) {
                           final tilt = pi * (1 - _flipAnimation.value);
-                          return Positioned(
-                            left: 25,
-                            top: 0,
+                          return Center(
                             child: Transform(
                               alignment: Alignment.center,
                               transform: Matrix4.identity()
                                 ..setEntry(3, 2, 0.001)
-                                ..translate(_dropXOffset.value, _dropYOffset.value)
+                                ..translateByDouble(
+                                  _dropXOffset.value,
+                                  _dropYOffset.value,
+                                  0,
+                                  1,
+                                )
                                 ..rotateZ(_dropRotation.value)
-                                ..scale(_dropScale.value)
+                                ..scaleByDouble(
+                                  _dropScale.value,
+                                  _dropScale.value,
+                                  1,
+                                  1,
+                                )
                                 ..rotateY(tilt),
-                              child: _PaperCard(
-                                width: 240,
-                                height: 330,
-                                prompt: prompts[promptIndex].text,
-                                seed:
-                                    '${prompts[promptIndex].id}-$promptIndex-${player?.id ?? ''}',
-                              ),
+                              child: child,
                             ),
                           );
                         },
@@ -1988,63 +3508,122 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
                 ),
               ),
               const SizedBox(height: 10),
-              if (_nextCardCooldown > 0)
-                Text(
-                  'Next card available in $_nextCardCooldown seconds',
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              const SizedBox(height: 10),
-              if (promptIndex < prompts.length - 1)
+              if (!_interactionEnded && hasMorePrompts)
                 _BlurMixButton(
-                  onPressed: (_submitting || _nextCardCooldown > 0) ? null : _drawNextPrompt,
+                  onPressed: (_submitting || _nextCardCooldown > 0)
+                      ? null
+                      : _drawNextPrompt,
                   seed: 'draw-next-card',
-                  width: 190,
-                  height: 48,
-                  fillColor: Colors.transparent,
-                  borderColor: Colors.white,
-                  textColor: Colors.white,
-                  textSize: 22,
-                  textWeight: FontWeight.w800,
-                  label: _submitting
-                      ? 'Drawing...'
-                      : _nextCardCooldown > 0
-                          ? 'Draw next card (${_nextCardCooldown}s)'
-                          : 'Draw next card',
-                )
-              else ...[
-                const Text(
-                  'All 3 prompts done — jump back to matching.',
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 8),
-                _BlurMixButton(
-                  onPressed: widget.onRoundComplete,
-                  seed: 'back-to-matching',
                   width: 220,
-                  height: 48,
-                  fillColor: Colors.transparent,
-                  borderColor: Colors.white,
-                  textColor: Colors.white,
-                  textSize: 20,
+                  height: 52,
+                  fillColor: _nextCardCooldown > 0
+                      ? const Color(0xFFD6D0C5)
+                      : _primaryButton,
+                  borderColor: _nextCardCooldown > 0
+                      ? const Color(0xFFC2B7A7)
+                      : _primaryButton,
+                  textColor: _nextCardCooldown > 0
+                      ? const Color(0xFF6F655B)
+                      : _offWhite,
+                  textSize: 18,
                   textWeight: FontWeight.w800,
-                  label: 'Back to matching',
+                  leadingIcon:
+                      _nextCardCooldown > 0 ? Icons.lock_outline : null,
+                  disabledOpacity: _nextCardCooldown > 0 ? 1 : 0.55,
+                  label: _submitting
+                      ? 'Loading next prompt...'
+                      : _nextCardCooldown > 0
+                          ? 'Locked ${_nextCardCooldown}s'
+                          : 'Next prompt',
+                )
+              else if (!_interactionEnded) ...[
+                _BlurMixButton(
+                  onPressed: (_submitting ||
+                          _nextCardCooldown > 0 ||
+                          waitingForPartnerDecision)
+                      ? null
+                      : _handleEndInteraction,
+                  seed: 'end-interaction',
+                  width: 220,
+                  height: 52,
+                  fillColor: _nextCardCooldown > 0
+                      ? const Color(0xFFD6D0C5)
+                      : _primaryButton,
+                  borderColor: _nextCardCooldown > 0
+                      ? const Color(0xFFC2B7A7)
+                      : _primaryButton,
+                  textColor: _nextCardCooldown > 0
+                      ? const Color(0xFF6F655B)
+                      : _offWhite,
+                  textSize: 18,
+                  textWeight: FontWeight.w800,
+                  leadingIcon:
+                      _nextCardCooldown > 0 ? Icons.lock_outline : null,
+                  disabledOpacity: _nextCardCooldown > 0 ? 1 : 0.55,
+                  label: _submitting
+                      ? 'Loading...'
+                      : waitingForPartnerDecision
+                          ? 'Waiting for them...'
+                          : _nextCardCooldown > 0
+                              ? 'Locked ${_nextCardCooldown}s'
+                              : endInteractionLabel,
                 ),
+                if (waitingForPartnerDecision) ...[
+                  const SizedBox(height: 10),
+                  const Text(
+                    'You picked keep going. Round 2 starts only if they do too.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: _ink, height: 1.35),
+                  ),
+                ],
               ],
             ] else
               const Padding(
                 padding: EdgeInsets.only(top: 10),
                 child: Text(
-                  'Prompts are syncing. Ask your partner to submit your code too.',
+                  'Your prompts are still loading. Ask the other person to enter your code too.',
                   textAlign: TextAlign.center,
                 ),
               ),
           ] else ...[
-            const Text('Enter any 4-character code to start:'),
+            if (widget.showInviteCodeCard &&
+                player != null &&
+                player.inviteCode.isNotEmpty) ...[
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                decoration: BoxDecoration(
+                  color: _primaryButton,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: _primaryButton),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x22000000),
+                      blurRadius: 14,
+                      offset: Offset(0, 8),
+                    ),
+                  ],
+                ),
+                child: Text(
+                  player.inviteCode.toUpperCase(),
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                        color: Colors.white,
+                        letterSpacing: 6,
+                        fontWeight: FontWeight.w800,
+                      ),
+                ),
+              ),
+              const SizedBox(height: 10),
+            ],
+            Text(
+              widget.codeEntryPrompt,
+              style: const TextStyle(color: _ink),
+            ),
             const SizedBox(height: 8),
             TextField(
               controller: _codeCtrl,
               maxLength: 4,
+              style: const TextStyle(color: _ink),
               textCapitalization: TextCapitalization.characters,
               decoration: const InputDecoration(
                 border: OutlineInputBorder(),
@@ -2055,7 +3634,8 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
             _BlurMixButton(
               onPressed: _submitting ? null : _submitCode,
               seed: 'pair-for-round',
-              label: _submitting ? 'Submitting...' : 'Start prompts',
+              width: double.infinity,
+              label: _submitting ? 'Joining...' : 'Start',
             )
           ],
           if (widget.error != null) ...[
@@ -2075,34 +3655,56 @@ class EndedView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        Text(
-          'Round Results',
-          textAlign: TextAlign.center,
-          style: Theme.of(context).textTheme.headlineSmall,
-        ),
-        const SizedBox(height: 12),
-        const Text('Status: Ended'),
-        const SizedBox(height: 20),
-        if (players.isEmpty)
-          const Text('Thanks for playing — keep your heart open, the best connections often arrive unexpectedly.')
-        else ...[
-          const Text('You both said you would like to see each other again:'),
-          const SizedBox(height: 8),
-          const Text('Take courage into your next conversation — meaningful love starts with one honest moment.'),
+    final bodyStyle = Theme.of(
+          context,
+        ).textTheme.bodyMedium?.copyWith(color: _ink) ??
+        const TextStyle(color: _ink);
+
+    return DefaultTextStyle.merge(
+      style: bodyStyle,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Text(
+            'Round Results',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  color: _ink,
+                ),
+          ),
           const SizedBox(height: 12),
-          ...players.map(
-            (player) => Card(
-              child: ListTile(
-                leading: const Text('👍', style: TextStyle(fontSize: 20)),
-                title: Text(player.name.isEmpty ? 'Another player' : player.name),
+          const Text('This round is complete.'),
+          const SizedBox(height: 20),
+          if (players.isEmpty)
+            const Text(
+                'Thanks for being here. Take a breath, reset, and enjoy the rest of the event.')
+          else ...[
+            const Text('These are the people who also want to keep talking:'),
+            const SizedBox(height: 8),
+            const Text('Follow up while the conversation is still fresh.'),
+            const SizedBox(height: 12),
+            ...players.map(
+              (player) => Card(
+                color: const Color(0xFFF9F5ED),
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(18),
+                  side: const BorderSide(color: _panelStroke),
+                ),
+                child: ListTile(
+                  leading: const Text('👍', style: TextStyle(fontSize: 20)),
+                  title: Text(
+                    player.name.isEmpty ? 'Another player' : player.name,
+                    style: Theme.of(
+                      context,
+                    ).textTheme.titleMedium?.copyWith(color: _ink),
+                  ),
+                ),
               ),
             ),
-          ),
+          ],
         ],
-      ],
+      ),
     );
   }
 }
@@ -2119,6 +3721,39 @@ class ErrorCard extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Text(message, style: const TextStyle(color: Colors.red)),
+        ),
+      ),
+    );
+  }
+}
+
+class _ContentPanel extends StatelessWidget {
+  const _ContentPanel({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 356),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: _panelColor,
+            borderRadius: BorderRadius.circular(28),
+            border: Border.all(color: _panelStroke),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x26000000),
+                blurRadius: 28,
+                offset: Offset(0, 18),
+              ),
+            ],
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 22, 20, 20),
+            child: child,
+          ),
         ),
       ),
     );
@@ -2146,7 +3781,8 @@ class ParticleSplashPainter extends CustomPainter {
         sin(angle) * (distance + wobble),
       );
       final alpha = ((1 - progress) * 255).toInt().clamp(0, 255);
-      paint.color = (i.isEven ? _ink : const Color(0xFF5C513D)).withAlpha(alpha);
+      paint.color =
+          (i.isEven ? _ink : const Color(0xFF5C513D)).withAlpha(alpha);
       canvas.drawCircle(center + offset, 2 + (1 - progress) * 4, paint);
     }
   }
@@ -2171,65 +3807,84 @@ class _PaperCard extends StatelessWidget {
   final String seed;
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: width,
-      height: height,
-      decoration: BoxDecoration(
-        color: const Color(0xFFF5F5F3),
-        borderRadius: BorderRadius.circular(9),
-        boxShadow: const [
-          BoxShadow(
-            blurRadius: 18,
-            offset: Offset(0, 10),
-            color: Color(0x33000000),
-          ),
-        ],
-      ),
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 14),
-      child: Column(
-        children: [
-          Expanded(
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(4),
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  _ChatGptTextureBackdrop(
-                    seed: seed,
-                    minScale: 1,
-                    maxScale: 1.2,
-                    applyTintOverlay: false,
-                  ),
-                  Positioned.fill(
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        border: Border.all(color: const Color(0xAAFFFFFF), width: 1.2),
-                      ),
+    return RepaintBoundary(
+      child: SizedBox(
+        width: width,
+        child: AspectRatio(
+          aspectRatio: width / height,
+          child: Container(
+            decoration: BoxDecoration(
+              color: const Color(0xFFF5F5F3),
+              borderRadius: BorderRadius.circular(9),
+              boxShadow: const [
+                BoxShadow(
+                  blurRadius: 18,
+                  offset: Offset(0, 10),
+                  color: Color(0x33000000),
+                ),
+              ],
+            ),
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 14),
+            child: Column(
+              children: [
+                Expanded(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        _ChatGptTextureBackdrop(
+                          seed: seed,
+                          minScale: 1,
+                          maxScale: 1.2,
+                          applyTintOverlay: false,
+                        ),
+                        const Positioned.fill(
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              gradient: RadialGradient(
+                                center: Alignment.center,
+                                radius: 0.9,
+                                colors: [
+                                  Color(0xD12A2A2A),
+                                  Color(0xA61A1A1A),
+                                  Color(0x4D0D0D0D),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                        Positioned.fill(
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              border: Border.all(
+                                  color: const Color(0xAAFFFFFF), width: 1.2),
+                            ),
+                          ),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
+                          child: Center(
+                            child: _FitPromptText(prompt: prompt),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  Center(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Padding(
-                        padding: const EdgeInsets.only(top: 22, bottom: 14),
-                        child: _FitPromptText(prompt: prompt),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'YouMe',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontFamily: 'cursive',
+                        fontStyle: FontStyle.italic,
+                        color: _ink,
                       ),
-                    ),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 8),
-          Text(
-            'You Me',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontFamily: 'cursive',
-                  fontStyle: FontStyle.italic,
-                  color: Colors.white,
-                ),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -2252,90 +3907,83 @@ class _QuotePromptCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: width,
-      height: height,
-      decoration: BoxDecoration(
-        color: const Color(0xFFF5F5F3),
-        borderRadius: BorderRadius.circular(9),
-        boxShadow: const [
-          BoxShadow(
-            blurRadius: 18,
-            offset: Offset(0, 10),
-            color: Color(0x33000000),
-          ),
-        ],
-      ),
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 14),
-      child: Column(
-        children: [
-          Expanded(
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(4),
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  _ChatGptTextureBackdrop(
-                    seed: seed,
-                    minScale: 1,
-                    maxScale: 1.2,
-                    applyTintOverlay: false,
-                  ),
-                  DecoratedBox(
-                    decoration: BoxDecoration(
-                      border: Border.all(color: const Color(0xAAFFFFFF), width: 1.2),
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.start,
-                      crossAxisAlignment: CrossAxisAlignment.center,
+    return RepaintBoundary(
+      child: SizedBox(
+        width: width,
+        child: AspectRatio(
+          aspectRatio: width / height,
+          child: Container(
+            decoration: BoxDecoration(
+              color: const Color(0xFFF5F5F3),
+              borderRadius: BorderRadius.circular(9),
+              boxShadow: const [
+                BoxShadow(
+                  blurRadius: 18,
+                  offset: Offset(0, 10),
+                  color: Color(0x33000000),
+                ),
+              ],
+            ),
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 14),
+            child: Column(
+              children: [
+                Expanded(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: Stack(
+                      fit: StackFit.expand,
                       children: [
-                        Flexible(
-                          child: Text(
-                            quote,
-                            textAlign: TextAlign.center,
-                            softWrap: true,
-                            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                                  color: const Color(0xFFF8F8F8),
-                                  fontWeight: FontWeight.w700,
-                                  shadows: const [
-                                    Shadow(color: Color(0xCC000000), blurRadius: 8),
-                                  ],
-                                ),
+                        _ChatGptTextureBackdrop(
+                          seed: seed,
+                          minScale: 1,
+                          maxScale: 1.2,
+                          applyTintOverlay: false,
+                        ),
+                        const Positioned.fill(
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              gradient: RadialGradient(
+                                center: Alignment.center,
+                                radius: 0.9,
+                                colors: [
+                                  Color(0xD12A2A2A),
+                                  Color(0xA61A1A1A),
+                                  Color(0x4D0D0D0D),
+                                ],
+                              ),
+                            ),
                           ),
                         ),
-                        if (author.isNotEmpty) ...[
-                          const SizedBox(height: 12),
-                          Text(
-                            author,
-                            textAlign: TextAlign.center,
-                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  color: const Color(0xFFF8F8F8),
-                                  shadows: const [
-                                    Shadow(color: Color(0xCC000000), blurRadius: 8),
-                                  ],
-                                ),
+                        DecoratedBox(
+                          decoration: BoxDecoration(
+                            border: Border.all(
+                                color: const Color(0xAAFFFFFF), width: 1.2),
                           ),
-                        ],
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
+                          child: _FitQuoteText(
+                            quote: quote,
+                            author: author,
+                          ),
+                        ),
                       ],
                     ),
                   ),
-                ],
-              ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'YouMe',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontFamily: 'cursive',
+                        fontStyle: FontStyle.italic,
+                        color: _ink,
+                      ),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 8),
-          Text(
-            'You Me',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontFamily: 'cursive',
-                  fontStyle: FontStyle.italic,
-                  color: Colors.white,
-                ),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -2419,9 +4067,10 @@ class _HeartRateBarPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final baselineY = size.height * 0.65;
-    final replacementGap = size.width * 0.16;
+    final replacementGap = size.width * (0.16 / 3);
     final sweepX = (size.width + replacementGap) * progress;
-    final newWaveEndX = (sweepX - replacementGap).clamp(0.0, size.width).toDouble();
+    final newWaveEndX =
+        (sweepX - replacementGap).clamp(0.0, size.width).toDouble();
     final oldWaveStartX = sweepX.clamp(0.0, size.width).toDouble();
     final path = Path()..moveTo(0, baselineY);
 
@@ -2429,9 +4078,11 @@ class _HeartRateBarPainter extends CustomPainter {
     final leadingSegment = size.width * 0.10;
     final trailingSegment = size.width * 0.10;
     final pulseWidth = size.width * 0.20;
-    final baseGapWidth =
-        (size.width - leadingSegment - trailingSegment - (pulseWidth * pulseCount)) /
-            (pulseCount + 1);
+    final baseGapWidth = (size.width -
+            leadingSegment -
+            trailingSegment -
+            (pulseWidth * pulseCount)) /
+        (pulseCount + 1);
     final gapWidth = baseGapWidth * 0.3;
 
     double x = leadingSegment + gapWidth;
@@ -2454,7 +4105,7 @@ class _HeartRateBarPainter extends CustomPainter {
     path.lineTo(size.width, baselineY);
 
     final waveGlowPaint = Paint()
-      ..color = toneColor.withOpacity(0.45)
+      ..color = toneColor.withValues(alpha: 0.45)
       ..strokeWidth = 13
       ..strokeCap = StrokeCap.round
       ..style = PaintingStyle.stroke
@@ -2476,7 +4127,8 @@ class _HeartRateBarPainter extends CustomPainter {
     }
 
     drawWave(
-      clipRect: Rect.fromLTWH(oldWaveStartX, 0, size.width - oldWaveStartX, size.height),
+      clipRect: Rect.fromLTWH(
+          oldWaveStartX, 0, size.width - oldWaveStartX, size.height),
     );
 
     drawWave(
@@ -2504,6 +4156,8 @@ class _BlurMixButton extends StatelessWidget {
     this.textColor = Colors.black,
     this.textSize = 20,
     this.textWeight = FontWeight.w700,
+    this.leadingIcon,
+    this.disabledOpacity = 0.55,
   });
 
   static const double _buttonWidth = 230;
@@ -2519,35 +4173,58 @@ class _BlurMixButton extends StatelessWidget {
   final Color textColor;
   final double textSize;
   final FontWeight textWeight;
+  final IconData? leadingIcon;
+  final double disabledOpacity;
 
   @override
   Widget build(BuildContext context) {
     final disabled = onPressed == null;
-    return GestureDetector(
-      onTap: onPressed,
-      child: Opacity(
-        opacity: disabled ? 0.55 : 1,
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(14),
-          child: Align(
-            alignment: Alignment.center,
-            child: Container(
-              width: width,
-              height: height,
-              decoration: BoxDecoration(
-                color: fillColor,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: borderColor),
-              ),
-              child: Center(
-                child: Text(
-                  label,
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                        color: textColor,
-                        fontWeight: textWeight,
-                        fontSize: textSize,
+    return Opacity(
+      opacity: disabled ? disabledOpacity : 1,
+      child: SizedBox(
+        width: width,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onPressed,
+            borderRadius: BorderRadius.circular(16),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: height),
+              child: Ink(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: fillColor,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: borderColor),
+                ),
+                child: Center(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (leadingIcon != null) ...[
+                        Icon(leadingIcon,
+                            size: textSize * 0.9, color: textColor),
+                        const SizedBox(width: 8),
+                      ],
+                      Flexible(
+                        child: Text(
+                          label,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          softWrap: true,
+                          textAlign: TextAlign.center,
+                          style:
+                              Theme.of(context).textTheme.labelLarge?.copyWith(
+                                    color: textColor,
+                                    fontWeight: textWeight,
+                                    fontSize: textSize,
+                                    height: 1.1,
+                                  ),
+                        ),
                       ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -2566,19 +4243,24 @@ class _FitPromptText extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final baseStyle = Theme.of(context).textTheme.titleLarge?.copyWith(
-          color: const Color(0xFFF8F8F8),
-          fontWeight: FontWeight.w700,
-          shadows: const [
-            Shadow(color: Color(0xCC000000), blurRadius: 8),
-          ],
-        );
+      color: Colors.white,
+      fontWeight: FontWeight.w700,
+      height: 1.12,
+      shadows: const [
+        Shadow(color: Color(0xCC000000), blurRadius: 16),
+      ],
+    );
     return LayoutBuilder(
       builder: (context, constraints) {
         final selectedSize = _largestFittingFontSize(
-          text: prompt,
           maxWidth: constraints.maxWidth,
           maxHeight: constraints.maxHeight,
-          baseStyle: baseStyle,
+          maxFont: 24,
+          minFont: 12,
+          textBuilder: (fontSize) => TextSpan(
+            text: prompt,
+            style: baseStyle?.copyWith(fontSize: fontSize),
+          ),
         );
         return Text(
           prompt,
@@ -2589,29 +4271,82 @@ class _FitPromptText extends StatelessWidget {
       },
     );
   }
+}
 
-  double _largestFittingFontSize({
-    required String text,
-    required double maxWidth,
-    required double maxHeight,
-    TextStyle? baseStyle,
-  }) {
-    const maxFont = 30.0;
-    const minFont = 12.0;
-    final painter = TextPainter(
-      textDirection: TextDirection.ltr,
-      textAlign: TextAlign.center,
+class _FitQuoteText extends StatelessWidget {
+  const _FitQuoteText({
+    required this.quote,
+    required this.author,
+  });
+
+  final String quote;
+  final String author;
+
+  @override
+  Widget build(BuildContext context) {
+    final quoteStyle = Theme.of(context).textTheme.titleLarge?.copyWith(
+      color: Colors.white,
+      fontWeight: FontWeight.w700,
+      height: 1.12,
+      shadows: const [
+        Shadow(color: Color(0xCC000000), blurRadius: 16),
+      ],
+    );
+    final authorStyle = Theme.of(context).textTheme.bodySmall?.copyWith(
+      color: Colors.white,
+      fontWeight: FontWeight.w600,
+      height: 1.25,
+      shadows: const [
+        Shadow(color: Color(0xB3000000), blurRadius: 12),
+      ],
     );
 
-    for (var size = maxFont; size >= minFont; size -= 1) {
-      painter.text = TextSpan(text: text, style: baseStyle?.copyWith(fontSize: size));
-      painter.layout(maxWidth: maxWidth);
-      if (painter.size.height <= maxHeight) {
-        return size;
-      }
-    }
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final selectedQuoteSize = _largestFittingFontSize(
+          maxWidth: constraints.maxWidth,
+          maxHeight: constraints.maxHeight,
+          maxFont: 24,
+          minFont: 12,
+          textBuilder: (quoteFontSize) => _buildSpan(
+            quoteStyle: quoteStyle,
+            authorStyle: authorStyle,
+            quoteFontSize: quoteFontSize,
+          ),
+        );
 
-    return minFont;
+        return Text.rich(
+          _buildSpan(
+            quoteStyle: quoteStyle,
+            authorStyle: authorStyle,
+            quoteFontSize: selectedQuoteSize,
+          ),
+          textAlign: TextAlign.center,
+          softWrap: true,
+        );
+      },
+    );
+  }
+
+  TextSpan _buildSpan({
+    required TextStyle? quoteStyle,
+    required TextStyle? authorStyle,
+    required double quoteFontSize,
+  }) {
+    final authorFontSize = max(10.0, quoteFontSize * 0.48);
+    return TextSpan(
+      children: [
+        TextSpan(
+          text: quote,
+          style: quoteStyle?.copyWith(fontSize: quoteFontSize),
+        ),
+        if (author.isNotEmpty)
+          TextSpan(
+            text: '\n\n$author',
+            style: authorStyle?.copyWith(fontSize: authorFontSize),
+          ),
+      ],
+    );
   }
 }
 
@@ -2630,7 +4365,8 @@ class _BlurMixBackdropState extends State<_BlurMixBackdrop> {
   @override
   void initState() {
     super.initState();
-    final instanceSalt = DateTime.now().microsecondsSinceEpoch + Random().nextInt(1 << 20);
+    final instanceSalt =
+        DateTime.now().microsecondsSinceEpoch + Random().nextInt(1 << 20);
     _instanceSeed = '${widget.seed}-$instanceSalt';
   }
 
@@ -2684,6 +4420,7 @@ class _ChatGptTextureBackdrop extends StatelessWidget {
                   resolvedTextureAsset,
                   fit: BoxFit.cover,
                   alignment: alignment,
+                  filterQuality: FilterQuality.low,
                 ),
               ),
             ),
@@ -2697,12 +4434,12 @@ class _ChatGptTextureBackdrop extends StatelessWidget {
                 end: Alignment.bottomCenter,
                 colors: [
                   Color.alphaBlend(
-                    toneColor.withOpacity(0.24 * gradientOpacity),
-                    Colors.black.withOpacity(0.36),
+                    toneColor.withValues(alpha: 0.24 * gradientOpacity),
+                    Colors.black.withValues(alpha: 0.36),
                   ),
                   Color.alphaBlend(
-                    toneColor.withOpacity(0.34 * gradientOpacity),
-                    Colors.black.withOpacity(0.62),
+                    toneColor.withValues(alpha: 0.34 * gradientOpacity),
+                    Colors.black.withValues(alpha: 0.62),
                   ),
                 ],
               ),
@@ -2711,66 +4448,6 @@ class _ChatGptTextureBackdrop extends StatelessWidget {
       ],
     );
   }
-}
-
-class _PaperBall extends StatelessWidget {
-  const _PaperBall({required this.diameter, required this.rotation});
-
-  final double diameter;
-  final double rotation;
-
-  @override
-  Widget build(BuildContext context) {
-    return Transform.rotate(
-      angle: rotation,
-      child: CustomPaint(
-        size: Size.square(diameter),
-        painter: _PaperBallPainter(),
-      ),
-    );
-  }
-}
-
-class _PaperBallPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final circle = Rect.fromCircle(
-      center: Offset(size.width / 2, size.height / 2),
-      radius: size.width / 2,
-    );
-
-    final paperPaint = Paint()
-      ..shader = const RadialGradient(
-        colors: [Color(0xFFF8F1DF), Color(0xFFE4D5B5)],
-        stops: [0.4, 1],
-      ).createShader(circle)
-      ..style = PaintingStyle.fill;
-
-    canvas.drawOval(circle, paperPaint);
-
-    final wrinkle = Paint()
-      ..color = const Color(0xFF8A7C63).withOpacity(0.4)
-      ..strokeWidth = 1.8
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round;
-
-    final center = Offset(size.width / 2, size.height / 2);
-    final radius = size.width / 2;
-    for (var i = 0; i < 9; i++) {
-      final angle = (2 * pi * i) / 9;
-      final p1 = center + Offset(cos(angle), sin(angle)) * (radius * 0.24);
-      final p2 = center + Offset(cos(angle + 0.35), sin(angle + 0.35)) * (radius * 0.8);
-      canvas.drawLine(p1, p2, wrinkle);
-    }
-
-    final shadow = Paint()
-      ..color = Colors.black.withOpacity(0.14)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10);
-    canvas.drawCircle(center + const Offset(0, 3), radius * 0.85, shadow);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 class RippedPaperClipper extends CustomClipper<Path> {
@@ -2816,7 +4493,7 @@ class _FilmOverlayState extends State<FilmOverlay>
     super.initState();
     _flickerController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1400),
+      duration: const Duration(milliseconds: 4200),
     )..repeat();
   }
 
@@ -2847,20 +4524,20 @@ class FilmGrainPainter extends CustomPainter {
     final flickerStrength = 0.025 + (sin(frame * pi * 4) + 1) * 0.008;
 
     final exposureFlicker = Paint()
-      ..color = _paper.withOpacity(flickerStrength);
+      ..color = _paper.withValues(alpha: flickerStrength);
     canvas.drawRect(Offset.zero & size, exposureFlicker);
 
     final vignette = Paint()
       ..shader = RadialGradient(
         colors: [
           Colors.transparent,
-          _ink.withOpacity(0.1),
+          _ink.withValues(alpha: 0.1),
         ],
         stops: const [0.5, 1],
       ).createShader(Rect.fromLTWH(0, 0, size.width, size.height));
     canvas.drawRect(Offset.zero & size, vignette);
 
-    final noise = Paint()..color = _ink.withOpacity(0.035);
+    final noise = Paint()..color = _ink.withValues(alpha: 0.035);
     for (double y = 0; y < size.height; y += 6) {
       final start = (sin(y * 0.2) + 1) * 8;
       canvas.drawLine(Offset(start, y), Offset(size.width - start, y), noise);
@@ -2878,12 +4555,13 @@ class FilmGrainPainter extends CustomPainter {
       final bloomPhaseOffset = i * pi / 2;
       final center = Offset(
         size.width * (0.2 + (i * 0.18)) + sin(phase + bloomPhaseOffset) * 20,
-        size.height * (0.25 + (i.isEven ? 0.1 : 0.45)) + cos((phase * 2) + bloomPhaseOffset) * 18,
+        size.height * (0.25 + (i.isEven ? 0.1 : 0.45)) +
+            cos((phase * 2) + bloomPhaseOffset) * 18,
       );
       final bloomRadius = 56 + sin((phase * 3) + bloomPhaseOffset) * 10;
       final bloomPaint = Paint()
         ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 26)
-        ..color = bloomColors[i].withOpacity(0.12);
+        ..color = bloomColors[i].withValues(alpha: 0.12);
       canvas.drawCircle(center, bloomRadius, bloomPaint);
     }
 
@@ -2895,7 +4573,7 @@ class FilmGrainPainter extends CustomPainter {
       final y = random.nextDouble() * size.height;
       final radius = 0.4 + random.nextDouble() * 1.2;
       final opacity = 0.04 + random.nextDouble() * 0.06;
-      dustPaint.color = _ink.withOpacity(opacity);
+      dustPaint.color = _ink.withValues(alpha: opacity);
       canvas.drawCircle(Offset(x, y), radius, dustPaint);
     }
   }

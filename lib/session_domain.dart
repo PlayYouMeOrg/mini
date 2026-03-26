@@ -1,18 +1,45 @@
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
-const _databaseBaseUrl =
-    'https://youmedev-feab4-default-rtdb.firebaseio.com';
+const _databaseBaseUrl = 'https://youmedev-feab4-default-rtdb.firebaseio.com';
 const _firestoreProjectId = 'youmedev-feab4';
+
+Future<String?> _firebaseIdToken() async {
+  try {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return null;
+    return await user.getIdToken();
+  } catch (_) {
+    return null;
+  }
+}
+
+Future<Map<String, String>> _authorizedHeaders({
+  bool includeJsonContentType = false,
+}) async {
+  final headers = <String, String>{};
+  if (includeJsonContentType) {
+    headers['Content-Type'] = 'application/json';
+  }
+
+  final token = await _firebaseIdToken();
+  if (token != null && token.isNotEmpty) {
+    headers['Authorization'] = 'Bearer $token';
+  }
+
+  return headers;
+}
 
 enum RoundPreference { openingUp, playful }
 
 extension RoundPreferenceLabel on RoundPreference {
-  String get label => this == RoundPreference.openingUp ? 'Opening up' : 'Playful';
+  String get label =>
+      this == RoundPreference.openingUp ? 'Opening up' : 'Playful';
 }
 
 class SignupPayload {
@@ -30,7 +57,6 @@ class SignupPayload {
   final bool acceptedPromoTexts;
   final RoundPreference roundPreference;
 }
-
 
 class PersistedSessionState {
   const PersistedSessionState({
@@ -105,6 +131,8 @@ class PlayerRecord {
     this.partnerCode,
     this.pairedWith,
     this.pairedRound,
+    this.interactionRound = 1,
+    this.continueVoteRound,
     this.currentPromptRound,
     this.currentPromptIndex = 0,
     this.currentRoundPrompts = const <String>[],
@@ -125,6 +153,8 @@ class PlayerRecord {
   String? partnerCode;
   String? pairedWith;
   int? pairedRound;
+  int interactionRound;
+  int? continueVoteRound;
   int? currentPromptRound;
   int currentPromptIndex;
   List<String> currentRoundPrompts;
@@ -148,6 +178,8 @@ class PlayerRecord {
       'partnerCode': partnerCode,
       'pairedWith': pairedWith,
       'pairedRound': pairedRound,
+      'interactionRound': interactionRound,
+      'continueVoteRound': continueVoteRound,
       'currentPromptRound': currentPromptRound,
       'currentPromptIndex': currentPromptIndex,
       'currentRoundPrompts': currentRoundPrompts,
@@ -168,11 +200,14 @@ class PlayerRecord {
       acceptedTermsAndGameTexts:
           (json['acceptedTermsAndGameTexts'] ?? false) as bool,
       acceptedPromoTexts: (json['acceptedPromoTexts'] ?? false) as bool,
-      roundPreference: _roundPreferenceFromString(json['roundPreference'] as String?),
+      roundPreference:
+          _roundPreferenceFromString(json['roundPreference'] as String?),
       inviteCode: (json['inviteCode'] ?? '') as String,
       partnerCode: json['partnerCode'] as String?,
       pairedWith: json['pairedWith'] as String?,
       pairedRound: (json['pairedRound'] as num?)?.toInt(),
+      interactionRound: (json['interactionRound'] as num?)?.toInt() ?? 1,
+      continueVoteRound: (json['continueVoteRound'] as num?)?.toInt(),
       currentPromptRound: (json['currentPromptRound'] as num?)?.toInt(),
       currentPromptIndex: (json['currentPromptIndex'] as num?)?.toInt() ?? 0,
       currentRoundPrompts: ((json['currentRoundPrompts'] as List?) ?? const [])
@@ -193,7 +228,10 @@ class PlayerRecord {
 List<String> _parseSeeAgainIds(Map<String, dynamic> json) {
   final raw = json['seeAgainPlayerIds'];
   if (raw is List) {
-    return raw.map((item) => item.toString()).where((id) => id.isNotEmpty).toList();
+    return raw
+        .map((item) => item.toString())
+        .where((id) => id.isNotEmpty)
+        .toList();
   }
 
   final legacyRaw = json['seeAgain'];
@@ -218,9 +256,10 @@ class FirestoreSignupService {
     required String sessionId,
     required PlayerRecord player,
   }) async {
+    final headers = await _authorizedHeaders(includeJsonContentType: true);
     final response = await http.patch(
       _uri('signups/${player.id}'),
-      headers: {'Content-Type': 'application/json'},
+      headers: headers,
       body: jsonEncode({
         'fields': {
           'sessionId': {'stringValue': sessionId},
@@ -237,7 +276,9 @@ class FirestoreSignupService {
           'acceptedPromoTexts': {
             'booleanValue': player.acceptedPromoTexts,
           },
-          'createdAt': {'timestampValue': DateTime.now().toUtc().toIso8601String()},
+          'createdAt': {
+            'timestampValue': DateTime.now().toUtc().toIso8601String()
+          },
         },
       }),
     );
@@ -254,10 +295,36 @@ class FirestoreSignupService {
 class RtdbService {
   Uri _uri(String path) => Uri.parse('$_databaseBaseUrl/$path.json');
 
+  Future<Uri> _authorizedUri(String path) async {
+    final uri = _uri(path);
+    final token = await _firebaseIdToken();
+    if (token == null || token.isEmpty) return uri;
+    return uri.replace(
+      queryParameters: {
+        ...uri.queryParameters,
+        'auth': token,
+      },
+    );
+  }
+
+  Future<http.Response> _get(String path) async {
+    final uri = await _authorizedUri(path);
+    return http.get(uri, headers: await _authorizedHeaders());
+  }
+
+  Future<http.Response> _patch(String path, Map<String, dynamic> body) async {
+    final uri = await _authorizedUri(path);
+    return http.patch(
+      uri,
+      headers: await _authorizedHeaders(includeJsonContentType: true),
+      body: jsonEncode(body),
+    );
+  }
+
   String _sessionBasePath(String sessionId) => 'mini/sessions/$sessionId';
 
   Future<SessionRecord> fetchSession(String sessionId) async {
-    final resp = await http.get(_uri(_sessionBasePath(sessionId)));
+    final resp = await _get(_sessionBasePath(sessionId));
     _throwIfNotOk(resp);
     final payload = jsonDecode(resp.body);
     if (payload is! Map<String, dynamic>) {
@@ -267,29 +334,48 @@ class RtdbService {
   }
 
   Future<void> ensureSessionOpen(String sessionId) async {
-    final resp = await http.patch(
-      _uri(_sessionBasePath(sessionId)),
-      body: jsonEncode(
-        {
-          'status': 'started',
-          'round': 1,
-          'updatedAt': DateTime.now().toIso8601String(),
-        },
-      ),
+    final resp = await _patch(
+      _sessionBasePath(sessionId),
+      {
+        'status': 'started',
+        'round': 1,
+        'updatedAt': DateTime.now().toIso8601String(),
+      },
     );
     _throwIfNotOk(resp);
   }
 
+  Future<SessionRecord> ensureSessionStarted(String sessionId) async {
+    final existing = await fetchSession(sessionId);
+    final normalizedStatus = existing.status?.trim().toLowerCase();
+    if (normalizedStatus == 'started' && existing.round != null) {
+      return existing;
+    }
+
+    final nextRound = existing.round ?? 1;
+    final resp = await _patch(
+      _sessionBasePath(sessionId),
+      {
+        'status': 'started',
+        'round': nextRound,
+        'updatedAt': DateTime.now().toIso8601String(),
+      },
+    );
+    _throwIfNotOk(resp);
+
+    return SessionRecord(status: 'started', round: nextRound);
+  }
+
   Future<void> savePlayer(String sessionId, PlayerRecord player) async {
-    final resp = await http.patch(
-      _uri('${_sessionBasePath(sessionId)}/players/${player.id}'),
-      body: jsonEncode(player.toJson()),
+    final resp = await _patch(
+      '${_sessionBasePath(sessionId)}/players/${player.id}',
+      player.toJson(),
     );
     _throwIfNotOk(resp);
   }
 
   Future<Map<String, PlayerRecord>> fetchPlayers(String sessionId) async {
-    final resp = await http.get(_uri('${_sessionBasePath(sessionId)}/players'));
+    final resp = await _get('${_sessionBasePath(sessionId)}/players');
     _throwIfNotOk(resp);
     final payload = jsonDecode(resp.body);
     if (payload is! Map<String, dynamic>) return {};
@@ -303,7 +389,7 @@ class RtdbService {
   }
 
   Future<PlayerRecord> fetchPlayer(String sessionId, String playerId) async {
-    final resp = await http.get(_uri('${_sessionBasePath(sessionId)}/players/$playerId'));
+    final resp = await _get('${_sessionBasePath(sessionId)}/players/$playerId');
     _throwIfNotOk(resp);
     final payload = jsonDecode(resp.body);
     if (payload is! Map<String, dynamic>) {
@@ -322,6 +408,8 @@ class RtdbService {
     me.partnerCode = enteredCode;
     me.pairedWith = partner.id;
     me.pairedRound = round;
+    me.interactionRound = 1;
+    me.continueVoteRound = null;
     me.matchedPlayerIds = {
       ...me.matchedPlayerIds,
       partner.id,
@@ -329,6 +417,8 @@ class RtdbService {
 
     partner.pairedWith = me.id;
     partner.pairedRound = round;
+    partner.interactionRound = 1;
+    partner.continueVoteRound = null;
     partner.matchedPlayerIds = {
       ...partner.matchedPlayerIds,
       me.id,
@@ -339,16 +429,16 @@ class RtdbService {
   }
 
   Future<void> clearPairing(String sessionId, String playerId) async {
-    final resp = await http.patch(
-      _uri('${_sessionBasePath(sessionId)}/players/$playerId'),
-      body: jsonEncode(
-        {
-          'pairedWith': null,
-          'pairedRound': null,
-          'partnerCode': null,
-          'updatedAt': DateTime.now().toIso8601String(),
-        },
-      ),
+    final resp = await _patch(
+      '${_sessionBasePath(sessionId)}/players/$playerId',
+      {
+        'pairedWith': null,
+        'pairedRound': null,
+        'partnerCode': null,
+        'interactionRound': 1,
+        'continueVoteRound': null,
+        'updatedAt': DateTime.now().toIso8601String(),
+      },
     );
     _throwIfNotOk(resp);
   }
@@ -364,14 +454,12 @@ class RtdbService {
       partnerId,
     }.toList();
 
-    final resp = await http.patch(
-      _uri('${_sessionBasePath(sessionId)}/players/$playerId'),
-      body: jsonEncode(
-        {
-          'seeAgainPlayerIds': updated,
-          'updatedAt': DateTime.now().toIso8601String(),
-        },
-      ),
+    final resp = await _patch(
+      '${_sessionBasePath(sessionId)}/players/$playerId',
+      {
+        'seeAgainPlayerIds': updated,
+        'updatedAt': DateTime.now().toIso8601String(),
+      },
     );
     _throwIfNotOk(resp);
   }
@@ -382,18 +470,35 @@ class RtdbService {
     required int round,
     required List<String> promptEntries,
     required List<String> askedPromptIds,
+    int interactionRound = 1,
+    int? continueVoteRound,
   }) async {
-    final resp = await http.patch(
-      _uri('${_sessionBasePath(sessionId)}/players/$playerId'),
-      body: jsonEncode(
-        {
-          'currentPromptRound': round,
-          'currentPromptIndex': 0,
-          'currentRoundPrompts': promptEntries,
-          'askedPromptIds': askedPromptIds,
-          'updatedAt': DateTime.now().toIso8601String(),
-        },
-      ),
+    final resp = await _patch(
+      '${_sessionBasePath(sessionId)}/players/$playerId',
+      {
+        'interactionRound': interactionRound,
+        'continueVoteRound': continueVoteRound,
+        'currentPromptRound': round,
+        'currentPromptIndex': 0,
+        'currentRoundPrompts': promptEntries,
+        'askedPromptIds': askedPromptIds,
+        'updatedAt': DateTime.now().toIso8601String(),
+      },
+    );
+    _throwIfNotOk(resp);
+  }
+
+  Future<void> setContinueVote({
+    required String sessionId,
+    required String playerId,
+    required int continueVoteRound,
+  }) async {
+    final resp = await _patch(
+      '${_sessionBasePath(sessionId)}/players/$playerId',
+      {
+        'continueVoteRound': continueVoteRound,
+        'updatedAt': DateTime.now().toIso8601String(),
+      },
     );
     _throwIfNotOk(resp);
   }
@@ -409,21 +514,27 @@ class RtdbService {
       'updatedAt': DateTime.now().toIso8601String(),
     };
 
-    final meResp = await http.patch(
-      _uri('${_sessionBasePath(sessionId)}/players/${me.id}'),
-      body: jsonEncode(update),
+    final meResp = await _patch(
+      '${_sessionBasePath(sessionId)}/players/${me.id}',
+      update,
     );
     _throwIfNotOk(meResp);
 
-    final partnerResp = await http.patch(
-      _uri('${_sessionBasePath(sessionId)}/players/$partnerId'),
-      body: jsonEncode(update),
+    final partnerResp = await _patch(
+      '${_sessionBasePath(sessionId)}/players/$partnerId',
+      update,
     );
     _throwIfNotOk(partnerResp);
   }
 
   void _throwIfNotOk(http.Response response) {
     if (response.statusCode >= 200 && response.statusCode < 300) return;
+    if (response.statusCode == 401 || response.statusCode == 403) {
+      throw StateError(
+        'Firebase permission denied. Sign in first or relax the backend rules. '
+        'HTTP ${response.statusCode}: ${response.body}',
+      );
+    }
     throw StateError(
       'HTTP ${response.statusCode} ${response.reasonPhrase ?? ''}: ${response.body}',
     );
@@ -529,6 +640,7 @@ String generateId() {
   final now = DateTime.now().millisecondsSinceEpoch;
   const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
   final random = Random.secure();
-  final suffix = List.generate(6, (_) => chars[random.nextInt(chars.length)]).join();
+  final suffix =
+      List.generate(6, (_) => chars[random.nextInt(chars.length)]).join();
   return '$now-$suffix';
 }

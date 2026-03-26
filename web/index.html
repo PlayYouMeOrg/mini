@@ -2,21 +2,27 @@
 <html>
 <head>
   <meta charset="UTF-8">
+  <base href="$FLUTTER_BASE_HREF">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>mini</title>
   <style>
     html, body {
       width: 100%;
       height: 100%;
       margin: 0;
+      padding: 0;
       overflow: hidden;
       background: #111827;
     }
     body {
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      position: fixed;
+      inset: 0;
+    }
+    body > flt-glass-pane,
+    body > .flt-glass-pane,
+    body > flutter-view {
+      width: 100%;
+      height: 100%;
     }
   </style>
 </head>
@@ -28,25 +34,41 @@
         return;
       }
 
+      function resolveGranularity(options) {
+        switch (options && options.type) {
+          case 'character':
+            return 'grapheme';
+          case 'sentence':
+            return 'sentence';
+          case 'line':
+          case 'word':
+          default:
+            return 'word';
+        }
+      }
+
       function SegmenterBreakIterator(locales, options) {
         const segmenter = new window.Intl.Segmenter(locales, {
-          granularity: 'grapheme',
-          ...(options || {}),
+          granularity: resolveGranularity(options),
         });
 
         let boundaries = [];
         let cursor = 0;
 
         this.adoptText = function (text) {
+          const value = String(text || '');
           boundaries = [0];
           cursor = 0;
 
-          for (const segment of segmenter.segment(String(text || ''))) {
-            boundaries.push(segment.index + segment.segment.length);
+          for (const segment of segmenter.segment(value)) {
+            const boundary = segment.index + segment.segment.length;
+            if (boundary > boundaries[boundaries.length - 1]) {
+              boundaries.push(boundary);
+            }
           }
 
-          if (boundaries.length === 0 || boundaries[boundaries.length - 1] !== String(text || '').length) {
-            boundaries.push(String(text || '').length);
+          if (boundaries[boundaries.length - 1] !== value.length) {
+            boundaries.push(value.length);
           }
         };
 
