@@ -37,7 +37,7 @@ const _gamePromptCardWidth = 224.0;
 const _gamePromptCardHeight = 292.0;
 const _gamePromptCanvasWidth = 266.0;
 const _gamePromptCanvasHeight = 328.0;
-const _cardDropDuration = Duration(milliseconds: 3000);
+const _cardDropDuration = Duration(milliseconds: 3800);
 const _initialInteractionRound = 1;
 const _finalInteractionRound = 2;
 const _continueVoteRound = 2;
@@ -2751,26 +2751,36 @@ class _WaitingViewState extends State<WaitingView>
     ]).animate(_dropCurve);
     _dropXOffset = TweenSequence<double>([
       TweenSequenceItem(
-        tween: Tween(begin: -34.0, end: 9.0)
+        tween: Tween(begin: -38.0, end: 16.0)
             .chain(CurveTween(curve: Curves.easeOutQuart)),
-        weight: 70,
+        weight: 58,
       ),
       TweenSequenceItem(
-        tween: Tween(begin: 9.0, end: 0.0)
+        tween: Tween(begin: 16.0, end: -11.0)
             .chain(CurveTween(curve: Curves.easeInOut)),
-        weight: 30,
+        weight: 24,
+      ),
+      TweenSequenceItem(
+        tween: Tween(begin: -11.0, end: 0.0)
+            .chain(CurveTween(curve: Curves.easeOutCubic)),
+        weight: 18,
       ),
     ]).animate(_dropCurve);
     _dropRotation = TweenSequence<double>([
       TweenSequenceItem(
-        tween: Tween(begin: 0.22, end: -0.08)
+        tween: Tween(begin: 0.28, end: -0.16)
             .chain(CurveTween(curve: Curves.easeOutQuart)),
-        weight: 75,
+        weight: 56,
       ),
       TweenSequenceItem(
-        tween: Tween(begin: -0.08, end: -0.03)
+        tween: Tween(begin: -0.16, end: 0.07)
+            .chain(CurveTween(curve: Curves.easeInOut)),
+        weight: 24,
+      ),
+      TweenSequenceItem(
+        tween: Tween(begin: 0.07, end: -0.03)
             .chain(CurveTween(curve: Curves.easeOut)),
-        weight: 25,
+        weight: 20,
       ),
     ]).animate(_dropCurve);
     _dropScale = Tween(begin: 0.94, end: 1.0)
@@ -2991,26 +3001,36 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
     ]).animate(_dropCurve);
     _dropXOffset = TweenSequence<double>([
       TweenSequenceItem(
-        tween: Tween(begin: -34.0, end: 9.0)
+        tween: Tween(begin: -38.0, end: 16.0)
             .chain(CurveTween(curve: Curves.easeOutQuart)),
-        weight: 70,
+        weight: 58,
       ),
       TweenSequenceItem(
-        tween: Tween(begin: 9.0, end: 0.0)
+        tween: Tween(begin: 16.0, end: -11.0)
             .chain(CurveTween(curve: Curves.easeInOut)),
-        weight: 30,
+        weight: 24,
+      ),
+      TweenSequenceItem(
+        tween: Tween(begin: -11.0, end: 0.0)
+            .chain(CurveTween(curve: Curves.easeOutCubic)),
+        weight: 18,
       ),
     ]).animate(_dropCurve);
     _dropRotation = TweenSequence<double>([
       TweenSequenceItem(
-        tween: Tween(begin: 0.22, end: -0.08)
+        tween: Tween(begin: 0.28, end: -0.16)
             .chain(CurveTween(curve: Curves.easeOutQuart)),
-        weight: 75,
+        weight: 56,
       ),
       TweenSequenceItem(
-        tween: Tween(begin: -0.08, end: -0.03)
+        tween: Tween(begin: -0.16, end: 0.07)
+            .chain(CurveTween(curve: Curves.easeInOut)),
+        weight: 24,
+      ),
+      TweenSequenceItem(
+        tween: Tween(begin: 0.07, end: -0.03)
             .chain(CurveTween(curve: Curves.easeOut)),
-        weight: 25,
+        weight: 20,
       ),
     ]).animate(_dropCurve);
     _dropScale = Tween(begin: 0.94, end: 1.0)
