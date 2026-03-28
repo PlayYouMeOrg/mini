@@ -29,14 +29,14 @@ const _backgroundImageAsset = 'assets/chat_gpt_texture.png';
 const _gameViewportSize = Size(390, 844);
 const _screenContentPadding = EdgeInsets.fromLTRB(20, 40, 20, 20);
 const _demoSessionId = 'demo-public';
-const _waitingQuoteCardWidth = 224.0;
-const _waitingQuoteCardHeight = 292.0;
-const _waitingQuoteCanvasWidth = 266.0;
-const _waitingQuoteCanvasHeight = 328.0;
-const _gamePromptCardWidth = 224.0;
-const _gamePromptCardHeight = 292.0;
-const _gamePromptCanvasWidth = 266.0;
-const _gamePromptCanvasHeight = 328.0;
+const _waitingQuoteCardWidth = 248.0;
+const _waitingQuoteCardHeight = 322.0;
+const _waitingQuoteCanvasWidth = 294.0;
+const _waitingQuoteCanvasHeight = 360.0;
+const _gamePromptCardWidth = 248.0;
+const _gamePromptCardHeight = 322.0;
+const _gamePromptCanvasWidth = 294.0;
+const _gamePromptCanvasHeight = 360.0;
 const _cardDropDuration = Duration(milliseconds: 3800);
 const _initialInteractionRound = 1;
 const _finalInteractionRound = 2;
@@ -3441,24 +3441,6 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
                   child: Stack(
                     clipBehavior: Clip.none,
                     children: [
-                      for (var i = 0;
-                          i < (promptIndex > 2 ? 2 : promptIndex);
-                          i++)
-                        Center(
-                          child: Transform.translate(
-                            offset: Offset(-8 + (i * 8), 8 + (i * 10)),
-                            child: Transform.rotate(
-                              angle: -0.045 + (i * 0.03),
-                              child: _PaperCard(
-                                width: _gamePromptCardWidth,
-                                height: _gamePromptCardHeight,
-                                prompt: prompts[promptIndex - i - 1].text,
-                                seed:
-                                    '${prompts[promptIndex - i - 1].id}-${promptIndex - i - 1}-${player.id}',
-                              ),
-                            ),
-                          ),
-                        ),
                       AnimatedBuilder(
                         animation: _dropController,
                         child: activePromptCard,
