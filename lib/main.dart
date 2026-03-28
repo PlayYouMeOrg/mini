@@ -37,7 +37,6 @@ const _gamePromptCardWidth = 224.0;
 const _gamePromptCardHeight = 292.0;
 const _gamePromptCanvasWidth = 266.0;
 const _gamePromptCanvasHeight = 328.0;
-const _cardFlipDuration = Duration(milliseconds: 2050);
 const _cardDropDuration = Duration(milliseconds: 3000);
 const _initialInteractionRound = 1;
 const _finalInteractionRound = 2;
@@ -2721,8 +2720,6 @@ class WaitingView extends StatefulWidget {
 
 class _WaitingViewState extends State<WaitingView>
     with TickerProviderStateMixin {
-  late final AnimationController _flipController;
-  late final Animation<double> _flipAnimation;
   late final AnimationController _dropController;
   late final Animation<double> _dropCurve;
   late final Animation<double> _dropYOffset;
@@ -2733,15 +2730,6 @@ class _WaitingViewState extends State<WaitingView>
   @override
   void initState() {
     super.initState();
-    _flipController = AnimationController(
-      vsync: this,
-      duration: _cardFlipDuration,
-      value: 1,
-    );
-    _flipAnimation = CurvedAnimation(
-      parent: _flipController,
-      curve: Curves.easeOutBack,
-    );
     _dropController = AnimationController(
       vsync: this,
       duration: _cardDropDuration,
@@ -2788,9 +2776,6 @@ class _WaitingViewState extends State<WaitingView>
     _dropScale = Tween(begin: 0.94, end: 1.0)
         .chain(CurveTween(curve: Curves.easeOutCubic))
         .animate(_dropCurve);
-    _flipController
-      ..reset()
-      ..forward();
     _dropController
       ..reset()
       ..forward();
@@ -2798,7 +2783,6 @@ class _WaitingViewState extends State<WaitingView>
 
   @override
   void dispose() {
-    _flipController.dispose();
     _dropController.dispose();
     super.dispose();
   }
@@ -2835,11 +2819,9 @@ class _WaitingViewState extends State<WaitingView>
                 width: _waitingQuoteCanvasWidth,
                 height: _waitingQuoteCanvasHeight,
                 child: AnimatedBuilder(
-                  animation:
-                      Listenable.merge([_flipAnimation, _dropController]),
+                  animation: _dropController,
                   child: quoteCard,
                   builder: (context, child) {
-                    final tilt = pi * (1 - _flipAnimation.value);
                     return Transform(
                       alignment: Alignment.center,
                       transform: Matrix4.identity()
@@ -2852,8 +2834,7 @@ class _WaitingViewState extends State<WaitingView>
                         )
                         ..rotateZ(_dropRotation.value)
                         ..scaleByDouble(
-                            _dropScale.value, _dropScale.value, 1, 1)
-                        ..rotateY(tilt),
+                            _dropScale.value, _dropScale.value, 1, 1),
                       child: child,
                     );
                   },
@@ -2931,8 +2912,6 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
   Timer? _nextCardTimer;
   int _nextCardCooldown = 0;
 
-  late final AnimationController _flipController;
-  late final Animation<double> _flipAnimation;
   late final AnimationController _dropController;
   late final Animation<double> _dropCurve;
   late final Animation<double> _dropYOffset;
@@ -2991,15 +2970,6 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-    _flipController = AnimationController(
-      vsync: this,
-      duration: _cardFlipDuration,
-      value: 1,
-    );
-    _flipAnimation = CurvedAnimation(
-      parent: _flipController,
-      curve: Curves.easeOutBack,
-    );
     _dropController = AnimationController(
       vsync: this,
       duration: _cardDropDuration,
@@ -3174,9 +3144,6 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
   }
 
   void _playCardDropAnimation() {
-    _flipController
-      ..reset()
-      ..forward();
     _dropController
       ..reset()
       ..forward();
@@ -3186,7 +3153,6 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
   void dispose() {
     _codeCtrl.dispose();
     _nextCardTimer?.cancel();
-    _flipController.dispose();
     _dropController.dispose();
     super.dispose();
   }
@@ -3474,11 +3440,9 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
                           ),
                         ),
                       AnimatedBuilder(
-                        animation:
-                            Listenable.merge([_flipAnimation, _dropController]),
+                        animation: _dropController,
                         child: activePromptCard,
                         builder: (context, child) {
-                          final tilt = pi * (1 - _flipAnimation.value);
                           return Center(
                             child: Transform(
                               alignment: Alignment.center,
@@ -3496,8 +3460,7 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
                                   _dropScale.value,
                                   1,
                                   1,
-                                )
-                                ..rotateY(tilt),
+                                ),
                               child: child,
                             ),
                           );
