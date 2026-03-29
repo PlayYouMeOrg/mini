@@ -2156,32 +2156,42 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
     }
 
     return Positioned(
+      left: 12,
       right: 12,
       bottom: 12,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: 0.7),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-          child: Wrap(
-            spacing: 6,
-            children: [
-              _PreviewStageButton(
-                  label: 'Signup', onTap: () => _setPreviewStage(Stage.signup)),
-              _PreviewStageButton(
-                  label: 'Waiting',
-                  onTap: () => _setPreviewStage(Stage.waiting)),
-              _PreviewStageButton(
-                  label: 'Matching',
-                  onTap: () => _setPreviewStage(Stage.matching)),
-              _PreviewStageButton(label: 'Error', onTap: _showPreviewError),
-              _PreviewStageButton(
-                  label: 'Game', onTap: () => _setPreviewStage(Stage.game)),
-              _PreviewStageButton(
-                  label: 'Ended', onTap: () => _setPreviewStage(Stage.ended)),
-            ],
+      child: SafeArea(
+        minimum: const EdgeInsets.only(bottom: 6),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.7),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _PreviewStageButton(
+                    label: 'Signup', onTap: () => _setPreviewStage(Stage.signup)),
+                const SizedBox(width: 6),
+                _PreviewStageButton(
+                    label: 'Waiting',
+                    onTap: () => _setPreviewStage(Stage.waiting)),
+                const SizedBox(width: 6),
+                _PreviewStageButton(
+                    label: 'Matching',
+                    onTap: () => _setPreviewStage(Stage.matching)),
+                const SizedBox(width: 6),
+                _PreviewStageButton(label: 'Error', onTap: _showPreviewError),
+                const SizedBox(width: 6),
+                _PreviewStageButton(
+                    label: 'Game', onTap: () => _setPreviewStage(Stage.game)),
+                const SizedBox(width: 6),
+                _PreviewStageButton(
+                    label: 'Ended', onTap: () => _setPreviewStage(Stage.ended)),
+              ],
+            ),
           ),
         ),
       ),
