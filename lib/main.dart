@@ -1983,53 +1983,45 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
         );
       case ScreenState.waiting:
         _logBody('waiting', 'Rendering waiting view for session $_sessionId');
-        return _ContentPanel(
-          child: WaitingView(
-            player: _player,
-            session: _session,
-            error: _error,
-          ),
+        return WaitingView(
+          player: _player,
+          session: _session,
+          error: _error,
         );
       case ScreenState.matching:
         _logBody('matching', 'Rendering matching view for session $_sessionId');
-        return _ContentPanel(
-          child: GameView(
-            player: _player,
-            session: _session,
-            error: _error,
-            onSubmitCode: _submitPartnerCode,
-            onDrawPrompt: _syncPromptDraw,
-            onContinueInteraction: _continueInteractionWithLevelTwoPrompts,
-            onEndInteraction:
-                _isLocalSandboxMode ? null : _endCurrentInteraction,
-            promptCatalog: _promptCatalog,
-            forceMatchingMode: true,
-            unpairedInstructions:
-                'Share your code, then enter someone else\'s 4-character code to start talking.',
-            codeEntryPrompt: 'Enter another person\'s 4-character code:',
-            showInviteCodeCard: true,
-            onRoundComplete: _isLocalSandboxMode ? _completeLocalRound : null,
-          ),
+        return GameView(
+          player: _player,
+          session: _session,
+          error: _error,
+          onSubmitCode: _submitPartnerCode,
+          onDrawPrompt: _syncPromptDraw,
+          onContinueInteraction: _continueInteractionWithLevelTwoPrompts,
+          onEndInteraction: _isLocalSandboxMode ? null : _endCurrentInteraction,
+          promptCatalog: _promptCatalog,
+          forceMatchingMode: true,
+          unpairedInstructions:
+              'Share your code, then enter someone else\'s 4-character code to start talking.',
+          codeEntryPrompt: 'Enter another person\'s 4-character code:',
+          showInviteCodeCard: true,
+          onRoundComplete: _isLocalSandboxMode ? _completeLocalRound : null,
         );
       case ScreenState.game:
         _logBody('game', 'Rendering game view for session $_sessionId');
-        return _ContentPanel(
-          child: GameView(
-            player: _player,
-            session: _session,
-            error: _error,
-            onSubmitCode: _submitPartnerCode,
-            onDrawPrompt: _syncPromptDraw,
-            onContinueInteraction: _continueInteractionWithLevelTwoPrompts,
-            onEndInteraction:
-                _isLocalSandboxMode ? null : _endCurrentInteraction,
-            promptCatalog: _promptCatalog,
-            unpairedInstructions:
-                'Share your code, then enter someone else\'s 4-character code to start talking.',
-            codeEntryPrompt: 'Enter another person\'s 4-character code:',
-            showInviteCodeCard: true,
-            onRoundComplete: _isLocalSandboxMode ? _completeLocalRound : null,
-          ),
+        return GameView(
+          player: _player,
+          session: _session,
+          error: _error,
+          onSubmitCode: _submitPartnerCode,
+          onDrawPrompt: _syncPromptDraw,
+          onContinueInteraction: _continueInteractionWithLevelTwoPrompts,
+          onEndInteraction: _isLocalSandboxMode ? null : _endCurrentInteraction,
+          promptCatalog: _promptCatalog,
+          unpairedInstructions:
+              'Share your code, then enter someone else\'s 4-character code to start talking.',
+          codeEntryPrompt: 'Enter another person\'s 4-character code:',
+          showInviteCodeCard: true,
+          onRoundComplete: _isLocalSandboxMode ? _completeLocalRound : null,
         );
       case ScreenState.ended:
         _logBody('ended', 'Rendering ended view for session $_sessionId');
@@ -2055,49 +2047,41 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
         );
       case Stage.waiting:
         _logBody('preview-waiting', 'Rendering preview waiting view');
-        return _ContentPanel(
-          child: WaitingView(
-            player: _player,
-            session: _session,
-            error: _error,
-          ),
+        return WaitingView(
+          player: _player,
+          session: _session,
+          error: _error,
         );
       case Stage.matching:
         _logBody('preview-matching', 'Rendering preview matching view');
-        return _ContentPanel(
-          child: GameView(
-            player: _player,
-            session: _session,
-            error: _error,
-            onSubmitCode: _submitPartnerCode,
-            onDrawPrompt: _syncPromptDraw,
-            onContinueInteraction: _continueInteractionWithLevelTwoPrompts,
-            promptCatalog: _promptCatalog,
-            forceMatchingMode: true,
-            unpairedInstructions:
-                'Enter a 4-character code to open a conversation.',
-            codeEntryPrompt: 'Enter a 4-character code:',
-            showInviteCodeCard: true,
-            onRoundComplete: _completeLocalRound,
-          ),
+        return GameView(
+          player: _player,
+          session: _session,
+          error: _error,
+          onSubmitCode: _submitPartnerCode,
+          onDrawPrompt: _syncPromptDraw,
+          onContinueInteraction: _continueInteractionWithLevelTwoPrompts,
+          promptCatalog: _promptCatalog,
+          forceMatchingMode: true,
+          unpairedInstructions: 'Enter a 4-character code to open a conversation.',
+          codeEntryPrompt: 'Enter a 4-character code:',
+          showInviteCodeCard: true,
+          onRoundComplete: _completeLocalRound,
         );
       case Stage.game:
         _logBody('preview-game', 'Rendering preview game view');
-        return _ContentPanel(
-          child: GameView(
-            player: _player,
-            session: _session,
-            error: _error,
-            onSubmitCode: _submitPartnerCode,
-            onDrawPrompt: _syncPromptDraw,
-            onContinueInteraction: _continueInteractionWithLevelTwoPrompts,
-            promptCatalog: _promptCatalog,
-            unpairedInstructions:
-                'Enter a 4-character code to open a conversation.',
-            codeEntryPrompt: 'Enter a 4-character code:',
-            showInviteCodeCard: true,
-            onRoundComplete: _completeLocalRound,
-          ),
+        return GameView(
+          player: _player,
+          session: _session,
+          error: _error,
+          onSubmitCode: _submitPartnerCode,
+          onDrawPrompt: _syncPromptDraw,
+          onContinueInteraction: _continueInteractionWithLevelTwoPrompts,
+          promptCatalog: _promptCatalog,
+          unpairedInstructions: 'Enter a 4-character code to open a conversation.',
+          codeEntryPrompt: 'Enter a 4-character code:',
+          showInviteCodeCard: true,
+          onRoundComplete: _completeLocalRound,
         );
       case Stage.ended:
         _logBody('preview-ended', 'Rendering preview ended view');
@@ -2838,26 +2822,67 @@ class _WaitingViewState extends State<WaitingView>
               child: SizedBox(
                 width: _waitingQuoteCanvasWidth,
                 height: _waitingQuoteCanvasHeight,
-                child: AnimatedBuilder(
-                  animation: _dropController,
-                  child: quoteCard,
-                  builder: (context, child) {
-                    return Transform(
-                      alignment: Alignment.center,
-                      transform: Matrix4.identity()
-                        ..setEntry(3, 2, 0.001)
-                        ..translateByDouble(
-                          _dropXOffset.value,
-                          _dropYOffset.value,
-                          0,
-                          1,
-                        )
-                        ..rotateZ(_dropRotation.value)
-                        ..scaleByDouble(
-                            _dropScale.value, _dropScale.value, 1, 1),
-                      child: child,
-                    );
-                  },
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Center(
+                      child: Transform(
+                        alignment: Alignment.center,
+                        transform: Matrix4.identity()
+                          ..translateByDouble(-14, 8, 0, 1)
+                          ..rotateZ(-0.12),
+                        child: Opacity(
+                          opacity: 0.9,
+                          child: _QuotePromptCard(
+                            width: _waitingQuoteCardWidth,
+                            height: _waitingQuoteCardHeight,
+                            quote: '',
+                            author: '',
+                            seed: 'waiting-stack-back-left',
+                          ),
+                        ),
+                      ),
+                    ),
+                    Center(
+                      child: Transform(
+                        alignment: Alignment.center,
+                        transform: Matrix4.identity()
+                          ..translateByDouble(10, 12, 0, 1)
+                          ..rotateZ(0.08),
+                        child: Opacity(
+                          opacity: 0.86,
+                          child: _QuotePromptCard(
+                            width: _waitingQuoteCardWidth,
+                            height: _waitingQuoteCardHeight,
+                            quote: '',
+                            author: '',
+                            seed: 'waiting-stack-back-right',
+                          ),
+                        ),
+                      ),
+                    ),
+                    AnimatedBuilder(
+                      animation: _dropController,
+                      child: quoteCard,
+                      builder: (context, child) {
+                        return Transform(
+                          alignment: Alignment.center,
+                          transform: Matrix4.identity()
+                            ..setEntry(3, 2, 0.001)
+                            ..translateByDouble(
+                              _dropXOffset.value,
+                              _dropYOffset.value,
+                              0,
+                              1,
+                            )
+                            ..rotateZ(_dropRotation.value)
+                            ..scaleByDouble(
+                                _dropScale.value, _dropScale.value, 1, 1),
+                          child: child,
+                        );
+                      },
+                    ),
+                  ],
                 ),
               ),
             );
@@ -3421,6 +3446,16 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
             prompt: prompts[promptIndex].text,
             seed: '${prompts[promptIndex].id}-$promptIndex-${player?.id ?? ''}',
           );
+    _PaperCard? buildStackCard(String seedSuffix) {
+      if (prompts.isEmpty) return null;
+      return _PaperCard(
+        width: _gamePromptCardWidth,
+        height: _gamePromptCardHeight,
+        prompt: prompts[promptIndex].text,
+        seed:
+            '${prompts[promptIndex].id}-$promptIndex-${player?.id ?? ''}-$seedSuffix',
+      );
+    }
 
     return SingleChildScrollView(
       padding: EdgeInsets.only(bottom: keyboardInset + 24),
@@ -3451,6 +3486,32 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
                   child: Stack(
                     clipBehavior: Clip.none,
                     children: [
+                      if (activePromptCard != null)
+                        Center(
+                          child: Transform(
+                            alignment: Alignment.center,
+                            transform: Matrix4.identity()
+                              ..translateByDouble(-14, 8, 0, 1)
+                              ..rotateZ(-0.11),
+                            child: Opacity(
+                              opacity: 0.9,
+                              child: buildStackCard('back-left'),
+                            ),
+                          ),
+                        ),
+                      if (activePromptCard != null)
+                        Center(
+                          child: Transform(
+                            alignment: Alignment.center,
+                            transform: Matrix4.identity()
+                              ..translateByDouble(10, 12, 0, 1)
+                              ..rotateZ(0.09),
+                            child: Opacity(
+                              opacity: 0.86,
+                              child: buildStackCard('back-right'),
+                            ),
+                          ),
+                        ),
                       AnimatedBuilder(
                         animation: _dropController,
                         child: activePromptCard,
