@@ -14,6 +14,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'session_domain.dart';
 import 'session_flow_bootstrap.dart';
+import 'story_prompt_demo.dart';
 
 const _paper = Color(0xFFF3F3EF);
 const _offWhite = Color(0xFFF5F3EB);
@@ -835,6 +836,19 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
       _logAppEvent(
         'Demo session ready: status=${session.status ?? '(none)'} round=${session.round ?? '(none)'}',
       );
+
+      final restored = await _restoreSavedSession(_sessionId!);
+      if (restored || !mounted) {
+        return;
+      }
+
+      setState(() {
+        _session = session;
+        _player = null;
+        _playerId = null;
+        _error = null;
+        _screenState = ScreenState.demoName;
+      });
     } catch (error) {
       _handleSessionJoinFailure(
         _backendErrorMessage(
@@ -843,10 +857,7 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
         ),
         fatalOnFailure: true,
       );
-      return;
     }
-
-    await _attemptSessionJoin(_sessionId!, fatalOnFailure: true);
   }
 
   PromptCatalog _buildFallbackPromptCatalog() {
@@ -1205,6 +1216,15 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
     String message, {
     required bool fatalOnFailure,
   }) {
+    if (_launchIntent.type == LaunchIntentType.demo && !fatalOnFailure) {
+      if (!mounted) return;
+      setState(() {
+        _error = message;
+        _screenState = ScreenState.demoName;
+      });
+      return;
+    }
+
     if (fatalOnFailure) {
       _showErrorScreen(message);
       return;
@@ -1213,15 +1233,19 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
     _showJoinScreen(error: message);
   }
 
-  Future<void> _joinAsGuest(String sessionId) async {
+  Future<void> _joinAsGuest(
+    String sessionId, {
+    String? guestName,
+  }) async {
     _logAppEvent('Joining as guest for session $sessionId');
 
     final guestId = generateId();
-    final guestName =
-        'Guest ${guestId.substring(guestId.length - 4).toUpperCase()}';
+    final resolvedGuestName = guestName?.trim().isNotEmpty == true
+        ? guestName!.trim()
+        : 'Guest ${guestId.substring(guestId.length - 4).toUpperCase()}';
     final player = PlayerRecord(
       id: guestId,
-      name: guestName,
+      name: resolvedGuestName,
       phone: '',
       gender: '',
       sexualPreference: '',
@@ -1254,6 +1278,28 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
 
     await _sessionStore.save(sessionId: sessionId, playerId: player.id);
     _startPolling();
+  }
+
+  Future<void> _submitDemoName(String name) async {
+    final normalizedName = name.trim();
+    if (normalizedName.isEmpty || _sessionId == null) return;
+
+    setState(() {
+      _screenState = ScreenState.booting;
+      _error = null;
+    });
+
+    try {
+      await _joinAsGuest(
+        _sessionId!,
+        guestName: normalizedName,
+      );
+    } catch (error) {
+      _handleSessionJoinFailure(
+        'Unable to join demo: $error',
+        fatalOnFailure: false,
+      );
+    }
   }
 
   @override
@@ -1972,6 +2018,15 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
         );
       case ScreenState.preview:
         return _buildPreviewBody();
+      case ScreenState.demoName:
+        _logBody(
+            'demo-name', 'Rendering demo name entry for session $_sessionId');
+        return _ContentPanel(
+          child: DemoNameForm(
+            onSubmit: _submitDemoName,
+            error: _error,
+          ),
+        );
       case ScreenState.signup:
         _logBody('signup', 'Rendering signup view for session $_sessionId');
         return _ContentPanel(
@@ -2004,6 +2059,7 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
               'Share your code, then enter someone else\'s 4-character code to start talking.',
           codeEntryPrompt: 'Enter another person\'s 4-character code:',
           showInviteCodeCard: true,
+          onOpenStoryPair: _openStoryPairFlow,
           onRoundComplete: _isLocalSandboxMode ? _completeLocalRound : null,
         );
       case ScreenState.game:
@@ -2021,6 +2077,7 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
               'Share your code, then enter someone else\'s 4-character code to start talking.',
           codeEntryPrompt: 'Enter another person\'s 4-character code:',
           showInviteCodeCard: true,
+          onOpenStoryPair: _openStoryPairFlow,
           onRoundComplete: _isLocalSandboxMode ? _completeLocalRound : null,
         );
       case ScreenState.ended:
@@ -2063,7 +2120,8 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
           onContinueInteraction: _continueInteractionWithLevelTwoPrompts,
           promptCatalog: _promptCatalog,
           forceMatchingMode: true,
-          unpairedInstructions: 'Enter a 4-character code to open a conversation.',
+          unpairedInstructions:
+              'Enter a 4-character code to open a conversation.',
           codeEntryPrompt: 'Enter a 4-character code:',
           showInviteCodeCard: true,
           onRoundComplete: _completeLocalRound,
@@ -2078,7 +2136,8 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
           onDrawPrompt: _syncPromptDraw,
           onContinueInteraction: _continueInteractionWithLevelTwoPrompts,
           promptCatalog: _promptCatalog,
-          unpairedInstructions: 'Enter a 4-character code to open a conversation.',
+          unpairedInstructions:
+              'Enter a 4-character code to open a conversation.',
           codeEntryPrompt: 'Enter a 4-character code:',
           showInviteCodeCard: true,
           onRoundComplete: _completeLocalRound,
@@ -2115,6 +2174,24 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
     setState(() {
       _player = refreshed;
     });
+  }
+
+  Future<void> _openStoryPairFlow() async {
+    if (_sessionId == null || _player == null || _player!.pairedWith == null) {
+      return;
+    }
+
+    final sessionRound = _session?.round ?? _player!.pairedRound ?? 1;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => StoryPairSessionPage(
+          sessionId: _sessionId!,
+          player: _player!,
+          partnerId: _player!.pairedWith!,
+          sessionRound: sessionRound,
+        ),
+      ),
+    );
   }
 
   void _completeLocalRound() {
@@ -2157,7 +2234,8 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 _PreviewStageButton(
-                    label: 'Signup', onTap: () => _setPreviewStage(Stage.signup)),
+                    label: 'Signup',
+                    onTap: () => _setPreviewStage(Stage.signup)),
                 const SizedBox(width: 6),
                 _PreviewStageButton(
                     label: 'Waiting',
@@ -2337,6 +2415,111 @@ class _JoinWithCodeViewState extends State<JoinWithCodeView> {
                 ),
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class DemoNameForm extends StatefulWidget {
+  const DemoNameForm({
+    super.key,
+    required this.onSubmit,
+    this.error,
+  });
+
+  final Future<void> Function(String name) onSubmit;
+  final String? error;
+
+  @override
+  State<DemoNameForm> createState() => _DemoNameFormState();
+}
+
+class _DemoNameFormState extends State<DemoNameForm> {
+  final _formKey = GlobalKey<FormState>();
+  final _nameCtrl = TextEditingController();
+  bool _submitting = false;
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() => _submitting = true);
+    try {
+      await widget.onSubmit(_nameCtrl.text.trim());
+    } finally {
+      if (mounted) {
+        setState(() => _submitting = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
+    return Center(
+      child: SingleChildScrollView(
+        padding: EdgeInsets.only(bottom: keyboardInset + 24),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 360),
+          child: Form(
+            key: _formKey,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Text(
+                  'Enter your name',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                        color: _ink,
+                      ),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'We save it to the demo session so the story action can use the right name.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: _ink),
+                ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: _nameCtrl,
+                  style: const TextStyle(color: _ink),
+                  textInputAction: TextInputAction.done,
+                  onFieldSubmitted: (_) => _submit(),
+                  validator: (value) {
+                    if ((value ?? '').trim().isEmpty) {
+                      return 'Enter your name';
+                    }
+                    return null;
+                  },
+                  decoration: const InputDecoration(
+                    labelText: 'Name',
+                    hintText: 'Avery',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                if (widget.error != null) ...[
+                  const SizedBox(height: 12),
+                  Text(widget.error!,
+                      style: const TextStyle(color: Colors.red)),
+                ],
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: _submitting ? null : _submit,
+                    child: Text(_submitting ? 'Joining demo...' : 'Continue'),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -2922,6 +3105,7 @@ class GameView extends StatefulWidget {
     this.forceMatchingMode = false,
     this.showInviteCodeCard = false,
     this.onRoundComplete,
+    this.onOpenStoryPair,
   });
 
   final PlayerRecord? player;
@@ -2940,6 +3124,7 @@ class GameView extends StatefulWidget {
   final bool forceMatchingMode;
   final bool showInviteCodeCard;
   final VoidCallback? onRoundComplete;
+  final Future<void> Function()? onOpenStoryPair;
 
   @override
   State<GameView> createState() => _GameViewState();
@@ -3612,6 +3797,13 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
                     style: TextStyle(color: _ink, height: 1.35),
                   ),
                 ],
+              ],
+              if (widget.onOpenStoryPair != null) ...[
+                const SizedBox(height: 12),
+                OutlinedButton(
+                  onPressed: widget.onOpenStoryPair,
+                  child: const Text('Open story cards'),
+                ),
               ],
             ] else
               const Padding(

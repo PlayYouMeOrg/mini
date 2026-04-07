@@ -321,6 +321,17 @@ class RtdbService {
     );
   }
 
+  Future<Object?> fetchValue(String path) async {
+    final resp = await _get(path);
+    _throwIfNotOk(resp);
+    return jsonDecode(resp.body);
+  }
+
+  Future<void> patchValue(String path, Map<String, dynamic> body) async {
+    final resp = await _patch(path, body);
+    _throwIfNotOk(resp);
+  }
+
   String _sessionBasePath(String sessionId) => 'mini/sessions/$sessionId';
 
   Future<SessionRecord> fetchSession(String sessionId) async {
@@ -527,6 +538,42 @@ class RtdbService {
     _throwIfNotOk(partnerResp);
   }
 
+  Future<StoryPairPlayerRecord?> fetchStoryPairPlayer({
+    required String pairId,
+    required String playerId,
+  }) async {
+    final payload =
+        await fetchValue('mini/storyPairs/$pairId/players/$playerId');
+    if (payload is! Map<String, dynamic>) return null;
+    return StoryPairPlayerRecord.fromJson(payload);
+  }
+
+  Future<StoryPairResultRecord?> fetchStoryPairResult(String pairId) async {
+    final payload = await fetchValue('mini/storyPairs/$pairId/result');
+    if (payload is! Map<String, dynamic>) return null;
+    return StoryPairResultRecord.fromJson(payload);
+  }
+
+  Future<void> saveStoryPairPlayer({
+    required String pairId,
+    required StoryPairPlayerRecord player,
+  }) async {
+    await patchValue(
+      'mini/storyPairs/$pairId/meta',
+      {
+        'sessionId': player.sessionId,
+        'pairRound': player.pairRound,
+        'playerIds': <String>[player.playerId, player.partnerId],
+        'updatedAt': DateTime.now().millisecondsSinceEpoch,
+      },
+    );
+
+    await patchValue(
+      'mini/storyPairs/$pairId/players/${player.playerId}',
+      player.toJson(),
+    );
+  }
+
   void _throwIfNotOk(http.Response response) {
     if (response.statusCode >= 200 && response.statusCode < 300) return;
     if (response.statusCode == 401 || response.statusCode == 403) {
@@ -628,6 +675,163 @@ class PromptCatalogService {
 
     return PromptCatalog(sets: sets, itemsById: itemsById);
   }
+}
+
+class StoryPairChoiceRecord {
+  const StoryPairChoiceRecord({
+    required this.typeName,
+    required this.options,
+    this.category,
+    this.selectedOption,
+  });
+
+  final String typeName;
+  final List<String> options;
+  final String? category;
+  final String? selectedOption;
+
+  bool get hasSelection => (selectedOption ?? '').trim().isNotEmpty;
+
+  Map<String, dynamic> toJson() {
+    return {
+      'typeName': typeName,
+      'options': options,
+      'category': category,
+      'selectedOption': selectedOption,
+    };
+  }
+
+  factory StoryPairChoiceRecord.fromJson(Map<String, dynamic> json) {
+    return StoryPairChoiceRecord(
+      typeName: (json['typeName'] ?? '') as String,
+      options: ((json['options'] as List?) ?? const [])
+          .map((item) => item.toString())
+          .where((item) => item.isNotEmpty)
+          .toList(),
+      category: (json['category'] as String?)?.trim().isEmpty ?? true
+          ? null
+          : json['category'] as String?,
+      selectedOption:
+          (json['selectedOption'] as String?)?.trim().isEmpty ?? true
+              ? null
+              : json['selectedOption'] as String?,
+    );
+  }
+}
+
+class StoryPairPlayerRecord {
+  const StoryPairPlayerRecord({
+    required this.playerId,
+    required this.name,
+    required this.sessionId,
+    required this.partnerId,
+    required this.pairRound,
+    required this.choices,
+    this.completedAt,
+  });
+
+  final String playerId;
+  final String name;
+  final String sessionId;
+  final String partnerId;
+  final int pairRound;
+  final List<StoryPairChoiceRecord> choices;
+  final int? completedAt;
+
+  bool get isComplete =>
+      completedAt != null &&
+      choices.length == 3 &&
+      choices.every((choice) => choice.hasSelection);
+
+  Map<String, dynamic> toJson() {
+    return {
+      'playerId': playerId,
+      'name': name,
+      'sessionId': sessionId,
+      'partnerId': partnerId,
+      'pairRound': pairRound,
+      'choices': choices.map((choice) => choice.toJson()).toList(),
+      'completedAt': completedAt,
+      'updatedAt': DateTime.now().millisecondsSinceEpoch,
+    };
+  }
+
+  factory StoryPairPlayerRecord.fromJson(Map<String, dynamic> json) {
+    return StoryPairPlayerRecord(
+      playerId: (json['playerId'] ?? '') as String,
+      name: (json['name'] ?? '') as String,
+      sessionId: (json['sessionId'] ?? '') as String,
+      partnerId: (json['partnerId'] ?? '') as String,
+      pairRound: (json['pairRound'] as num?)?.toInt() ?? 1,
+      choices: ((json['choices'] as List?) ?? const [])
+          .whereType<Map>()
+          .map(
+            (item) => StoryPairChoiceRecord.fromJson(
+              Map<String, dynamic>.from(item),
+            ),
+          )
+          .toList(),
+      completedAt: (json['completedAt'] as num?)?.toInt(),
+    );
+  }
+}
+
+class StoryPairResultRecord {
+  const StoryPairResultRecord({
+    required this.status,
+    this.text,
+    this.error,
+    this.completedAt,
+  });
+
+  final String status;
+  final String? text;
+  final String? error;
+  final int? completedAt;
+
+  bool get isComplete => status == 'complete';
+  bool get isProcessing => status == 'processing';
+  bool get isWaiting => status == 'waiting' || status == 'pending';
+  bool get isError => status == 'error';
+
+  Map<String, dynamic> toJson() {
+    return {
+      'status': status,
+      'text': text,
+      'error': error,
+      'completedAt': completedAt,
+    };
+  }
+
+  factory StoryPairResultRecord.fromJson(Map<String, dynamic> json) {
+    return StoryPairResultRecord(
+      status: ((json['status'] ?? 'waiting') as String).trim().isEmpty
+          ? 'waiting'
+          : (json['status'] as String),
+      text: json['text'] as String?,
+      error: json['error'] as String?,
+      completedAt: (json['completedAt'] as num?)?.toInt(),
+    );
+  }
+}
+
+String buildStoryPairId({
+  required String sessionId,
+  required String playerId,
+  required String partnerId,
+  required int pairRound,
+}) {
+  final normalizedSession = _sanitizeStoryPairSegment(sessionId);
+  final sortedPlayers = [
+    _sanitizeStoryPairSegment(playerId),
+    _sanitizeStoryPairSegment(partnerId),
+  ]..sort();
+  return '$normalizedSession--${sortedPlayers.join('--')}--r$pairRound';
+}
+
+String _sanitizeStoryPairSegment(String value) {
+  final sanitized = value.trim().replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
+  return sanitized.isEmpty ? 'unknown' : sanitized;
 }
 
 String generateInviteCode() {

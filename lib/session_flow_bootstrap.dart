@@ -5,6 +5,7 @@ enum ScreenState {
   join,
   error,
   preview,
+  demoName,
   signup,
   waiting,
   matching,

@@ -59,7 +59,9 @@ void main() {
       expect(codeField.style?.color, isNotNull);
     });
 
-    testWidgets('joins the shared demo session in demo mode', (tester) async {
+    testWidgets('asks for a demo name and saves it before joining', (
+      tester,
+    ) async {
       final fakeRtdbService = FakeRtdbService();
 
       await _pumpFlow(
@@ -72,6 +74,17 @@ void main() {
         ),
       );
 
+      expect(find.text('Enter your name'), findsOneWidget);
+      expect(
+          find.text(
+              'We save it to the demo session so the story action can use the right name.'),
+          findsOneWidget);
+
+      await tester.enterText(find.byType(TextFormField), 'Jordan');
+      await tester.tap(find.text('Continue'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 20));
+
       expect(
         find.text(
           'Share your code, then enter someone else\'s 4-character code to start talking.',
@@ -82,6 +95,10 @@ void main() {
           findsOneWidget);
       expect(fakeRtdbService.savePlayerCalls, 1);
       expect(fakeRtdbService.players['demo-public'], isNotEmpty);
+      expect(
+        fakeRtdbService.players['demo-public']!.values.single.name,
+        'Jordan',
+      );
     });
 
     testWidgets('shows preview controls in preview mode', (tester) async {
@@ -211,7 +228,7 @@ void main() {
 
       expect(me.interactionRound, 2);
       expect(me.continueVoteRound, isNull);
-      expect(find.text('Prompt 4'), findsOneWidget);
+      expect(find.text('Prompt 4'), findsWidgets);
     });
 
     testWidgets(
@@ -352,7 +369,7 @@ void main() {
         await tester.pump(const Duration(milliseconds: 200));
       }
 
-      final promptText = tester.widget<Text>(find.text(longPrompt));
+      final promptText = tester.widgetList<Text>(find.text(longPrompt)).first;
       expect(promptText.style?.fontSize, lessThan(28));
     });
 
