@@ -1,6 +1,10 @@
 {
   "rules": {
     "mini": {
+      "prompts": {
+        ".read": true,
+        ".write": true
+      },
       "sessions": {
         "$sessionId": {
           ".read": true,

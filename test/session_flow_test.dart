@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mini/main.dart';
 import 'package:mini/session_domain.dart';
 import 'package:mini/session_flow_bootstrap.dart';
+import 'package:mini/story_prompt_demo.dart';
 
 void main() {
   group('LaunchIntent.fromUri', () {
@@ -344,6 +345,7 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: GameView(
+              sessionId: 'test-session',
               player: player,
               session: SessionRecord(status: 'started', round: 1),
               onSubmitCode: (_) async {},
@@ -392,6 +394,7 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: GameView(
+              sessionId: 'test-session',
               player: player,
               session: SessionRecord(status: 'started', round: 1),
               onSubmitCode: (_) async {},
@@ -429,6 +432,64 @@ void main() {
       expect(find.text('Finish interaction'), findsWidgets);
       expect(find.text('Keep going'), findsNothing);
     });
+
+    testWidgets('shows server-backed story options on the fourth card', (
+      tester,
+    ) async {
+      final promptCatalog =
+          await FakePromptCatalogService().loadDatingCatalog();
+      final fakeRtdbService = FakeRtdbService();
+      final player = _buildPairedPlayer(
+        id: 'player-1',
+        name: 'Preview User',
+        partnerId: 'player-2',
+        currentRoundPrompts: const ['p1', 'p2', 'p3', storyModePromptId],
+        askedPromptIds: const ['p1', 'p2', 'p3'],
+        currentPromptIndex: 3,
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: GameView(
+              sessionId: 'test-session',
+              player: player,
+              session: SessionRecord(status: 'started', round: 1),
+              onSubmitCode: (_) async {},
+              onDrawPrompt: ({
+                required int promptIndex,
+                required String partnerId,
+              }) async {},
+              onContinueInteraction: () async {},
+              promptCatalog: promptCatalog,
+              storyPromptCatalogService: FakeStoryPromptCatalogService(),
+              storyRtdbService: fakeRtdbService,
+              unpairedInstructions:
+                  'Enter any 4-character code to connect instantly.',
+              codeEntryPrompt: 'Enter any 4-character code to start:',
+            ),
+          ),
+        ),
+      );
+
+      await tester.pumpAndSettle();
+      if (find.text('Got it').evaluate().isNotEmpty) {
+        await tester.tap(find.text('Got it'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 200));
+      }
+      await tester.pump(const Duration(seconds: 15));
+      await tester.pump();
+
+      expect(find.text('Story mode'), findsOneWidget);
+      expect(find.text('Action'), findsOneWidget);
+      expect(find.text('Animal'), findsOneWidget);
+      expect(find.text('Clothing'), findsOneWidget);
+      expect(
+        find.byIcon(Icons.radio_button_unchecked_rounded),
+        findsNWidgets(9),
+      );
+    });
   });
 }
 
@@ -465,6 +526,13 @@ class FakeRtdbService extends RtdbService {
 
   final Map<String, SessionRecord> sessions;
   final Map<String, Map<String, PlayerRecord>> players;
+  final Map<String, Map<String, StoryPairPlayerRecord>> storyPairPlayers =
+      <String, Map<String, StoryPairPlayerRecord>>{};
+  final Map<String, StoryPairResultRecord> storyPairResults =
+      <String, StoryPairResultRecord>{};
+  final Map<String, String> storyPairStories = <String, String>{};
+  final Map<String, String> storyPairPrompts = <String, String>{};
+  final Map<String, bool> storyPairReady = <String, bool>{};
   final Object? fetchSessionError;
   int savePlayerCalls = 0;
 
@@ -565,6 +633,58 @@ class FakeRtdbService extends RtdbService {
 
     player.continueVoteRound = continueVoteRound;
   }
+
+  @override
+  Future<StoryPairPlayerRecord?> fetchStoryPairPlayer({
+    required String pairId,
+    required String playerId,
+  }) async {
+    final player = storyPairPlayers[pairId]?[playerId];
+    if (player == null) return null;
+    return StoryPairPlayerRecord.fromJson(player.toJson());
+  }
+
+  @override
+  Future<StoryPairResultRecord?> fetchStoryPairResult(String pairId) async {
+    final story = storyPairStories[pairId];
+    if (story != null && story.trim().isNotEmpty) {
+      return StoryPairResultRecord(status: 'complete', text: story);
+    }
+
+    final result = storyPairResults[pairId];
+    if (result != null) {
+      return StoryPairResultRecord.fromJson(result.toJson());
+    }
+
+    if (storyPairReady[pairId] == true ||
+        (storyPairPrompts[pairId]?.trim().isNotEmpty ?? false)) {
+      return const StoryPairResultRecord(status: 'waiting');
+    }
+
+    return null;
+  }
+
+  @override
+  Future<void> saveStoryPairPlayer({
+    required String pairId,
+    required StoryPairPlayerRecord player,
+  }) async {
+    storyPairPlayers.putIfAbsent(
+            pairId, () => <String, StoryPairPlayerRecord>{})[player.playerId] =
+        StoryPairPlayerRecord.fromJson(player.toJson());
+
+    final storyPrompt = buildStoryPairPrompt(
+      storyPairPlayers[pairId]!.values,
+    );
+    if (storyPrompt == null) {
+      storyPairPrompts.remove(pairId);
+      storyPairReady[pairId] = false;
+      return;
+    }
+
+    storyPairPrompts[pairId] = storyPrompt;
+    storyPairReady[pairId] = true;
+  }
 }
 
 PlayerRecord _clonePlayer(PlayerRecord player) {
@@ -598,6 +718,29 @@ class FakePromptCatalogService extends PromptCatalogService {
         'p3': PromptItem(id: 'p3', text: 'Prompt 3'),
         'p4': PromptItem(id: 'p4', text: 'Prompt 4'),
       },
+    );
+  }
+}
+
+class FakeStoryPromptCatalogService implements StoryPromptCatalogService {
+  @override
+  Future<StoryPromptDeck> loadStoryDeck() async {
+    return const StoryPromptDeck(
+      playerPrompt: 'Choose one option from each card.',
+      categories: <StoryPromptType>[
+        StoryPromptType(
+          category: 'Action',
+          options: ['kiss', 'tease', 'chase', 'hide'],
+        ),
+        StoryPromptType(
+          category: 'Animal',
+          options: ['fox', 'owl', 'wolf', 'cat'],
+        ),
+        StoryPromptType(
+          category: 'Clothing',
+          options: ['leather', 'silk', 'denim', 'linen'],
+        ),
+      ],
     );
   }
 }

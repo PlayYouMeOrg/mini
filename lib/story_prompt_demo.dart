@@ -1,9 +1,7 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 
 import 'session_domain.dart';
 
@@ -16,14 +14,6 @@ const _demoMutedInk = Color(0xFF685E54);
 const _demoAccent = Color(0xFFB85432);
 const _demoAccentSoft = Color(0xFFF6E0D4);
 const _storyPromptPath = 'mini/prompts';
-const _storyPairActionUrl =
-    String.fromEnvironment('STORY_PAIR_ACTION_URL', defaultValue: '');
-const _storyCardTextureAssets = <String>[
-  'assets/Polaroid1.png',
-  'assets/Polaroid2.png',
-  'assets/Polaroid3.png',
-  'assets/Polaroid4.png',
-];
 const _storyMetadataKeys = <String>{
   'prompt',
   'playerprompt',
@@ -273,8 +263,23 @@ void _collectStoryPromptTypes(
   String? fallbackName,
 }) {
   if (raw is List) {
+    final categoryName = _extractCategoryName(raw, fallbackName);
+    final options = _extractPromptOptions(raw);
+    if (categoryName != null && options.length >= 3) {
+      final normalizedKey = categoryName.toLowerCase();
+      if (seenCategories.add(normalizedKey)) {
+        types.add(StoryPromptType(category: categoryName, options: options));
+      }
+      return;
+    }
+
     for (final item in raw) {
-      _collectStoryPromptTypes(item, types, seenCategories);
+      _collectStoryPromptTypes(
+        item,
+        types,
+        seenCategories,
+        fallbackName: fallbackName,
+      );
     }
     return;
   }
@@ -363,27 +368,29 @@ List<String> _extractPromptOptions(Object? raw) {
   return _extractOrderedLeafValues(raw);
 }
 
-List<String> _extractOrderedLeafValues(Map raw) {
+List<String> _extractOrderedLeafValues(Object? raw) {
+  if (raw is List) {
+    return raw
+        .expand(_extractOrderedLeafValues)
+        .where((value) => value.trim().isNotEmpty)
+        .toList();
+  }
+  if (raw is! Map) {
+    final normalized = raw?.toString().trim();
+    return normalized == null || normalized.isEmpty
+        ? const <String>[]
+        : <String>[normalized];
+  }
+
   final entries = raw.entries.toList()
     ..sort((left, right) => _comparePromptNodeKeys(left.key, right.key));
   final values = <String>[];
-  var hasNestedValue = false;
   for (final entry in entries) {
     final normalizedKey = entry.key.toString().toLowerCase();
     if (_storyMetadataKeys.contains(normalizedKey)) continue;
-    final value = entry.value;
-    if (value is Map || value is List) {
-      hasNestedValue = true;
-      continue;
-    }
-
-    final normalized = value.toString().trim();
-    if (normalized.isNotEmpty) {
-      values.add(normalized);
-    }
+    values.addAll(_extractOrderedLeafValues(entry.value));
   }
 
-  if (hasNestedValue) return const <String>[];
   return values;
 }
 
@@ -422,13 +429,7 @@ int _stableSeedFromString(String value) {
   return hash & 0x7fffffff;
 }
 
-String _storyTextureAssetForSeed(String seed) {
-  final random = Random(_stableSeedFromString(seed));
-  return _storyCardTextureAssets[
-      random.nextInt(_storyCardTextureAssets.length)];
-}
-
-Alignment _storyImageAlignmentForSeed(String seed) {
+Alignment _storyGlowAlignmentForSeed(String seed) {
   final random = Random(_stableSeedFromString('$seed-align'));
   return Alignment(
     -1 + (random.nextDouble() * 2),
@@ -548,13 +549,26 @@ class StoryPromptCardDealer {
     }
 
     final eligibleTypes = _eligibleTypes(types, optionCount);
-    final requiredTypeCount = uniquePlayerIds.length * typeCount;
-    if (eligibleTypes.length < requiredTypeCount) {
+    if (eligibleTypes.length < typeCount) {
       throw StateError(
-        'Need at least $requiredTypeCount prompt categories with '
-        '$optionCount items each to deal $typeCount different categories '
-        'to ${uniquePlayerIds.length} players.',
+        'Need at least $typeCount prompt categories with '
+        '$optionCount items each to deal a story card.',
       );
+    }
+
+    final requiredUniqueTypeCount = uniquePlayerIds.length * typeCount;
+    if (eligibleTypes.length < requiredUniqueTypeCount) {
+      return {
+        for (var index = 0; index < uniquePlayerIds.length; index += 1)
+          uniquePlayerIds[index]: dealPromptCard(
+            eligibleTypes,
+            playerIndex: index,
+            typeCount: typeCount,
+            optionCount: optionCount,
+            playerPrompt: playerPrompt,
+            seed: '$seed-${uniquePlayerIds[index]}',
+          ),
+      };
     }
 
     final shuffledTypes = List<StoryPromptType>.from(eligibleTypes)
@@ -613,59 +627,7 @@ class UnsupportedStoryPromptCompletionService
   @override
   Future<String> generateStory(StoryPromptSubmission submission) {
     throw StateError(
-      'This demo no longer calls OpenAI from the browser. Use the paired story flow with STORY_PAIR_ACTION_URL configured.',
-    );
-  }
-}
-
-abstract class StoryPairActionService {
-  Future<StoryPairResultRecord> requestGeneration({
-    required String pairId,
-  });
-}
-
-class HttpStoryPairActionService implements StoryPairActionService {
-  HttpStoryPairActionService({String? actionUrl})
-      : _actionUrl = actionUrl ?? _storyPairActionUrl;
-
-  final String _actionUrl;
-
-  @override
-  Future<StoryPairResultRecord> requestGeneration({
-    required String pairId,
-  }) async {
-    if (_actionUrl.trim().isEmpty) {
-      throw StateError(
-        'Missing STORY_PAIR_ACTION_URL. Run with --dart-define=STORY_PAIR_ACTION_URL=https://.../generatePairStory.',
-      );
-    }
-
-    final response = await http.post(
-      Uri.parse(_actionUrl),
-      headers: const {
-        'Content-Type': 'application/json',
-      },
-      body: jsonEncode({
-        'pairId': pairId,
-      }),
-    );
-
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw StateError(
-        'Story action failed: HTTP ${response.statusCode} ${response.reasonPhrase ?? ''} ${response.body}',
-      );
-    }
-
-    final payload = jsonDecode(response.body);
-    if (payload is! Map<String, dynamic>) {
-      throw StateError('Story action returned an invalid payload.');
-    }
-
-    return StoryPairResultRecord(
-      status: (payload['status'] ?? 'waiting').toString(),
-      text: payload['text'] as String?,
-      error: payload['error'] as String?,
-      completedAt: (payload['completedAt'] as num?)?.toInt(),
+      'This demo no longer calls OpenAI from the browser. Use the paired story flow, which writes the pair prompt to RTDB and waits for story.',
     );
   }
 }
@@ -962,7 +924,7 @@ class _StoryPromptDemoPageState extends State<StoryPromptDemoPage> {
                           if (stacked) {
                             return Column(
                               children: [
-                                _PlayerPromptCard(
+                                StoryPlayerPromptCard(
                                   title: _playerOneName,
                                   subtitle: 'Player 1',
                                   card: cards[0],
@@ -974,7 +936,7 @@ class _StoryPromptDemoPageState extends State<StoryPromptDemoPage> {
                                   ),
                                 ),
                                 const SizedBox(height: 16),
-                                _PlayerPromptCard(
+                                StoryPlayerPromptCard(
                                   title: _playerTwoName,
                                   subtitle: 'Player 2',
                                   card: cards[1],
@@ -993,7 +955,7 @@ class _StoryPromptDemoPageState extends State<StoryPromptDemoPage> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Expanded(
-                                child: _PlayerPromptCard(
+                                child: StoryPlayerPromptCard(
                                   title: _playerOneName,
                                   subtitle: 'Player 1',
                                   card: cards[0],
@@ -1007,7 +969,7 @@ class _StoryPromptDemoPageState extends State<StoryPromptDemoPage> {
                               ),
                               const SizedBox(width: 16),
                               Expanded(
-                                child: _PlayerPromptCard(
+                                child: StoryPlayerPromptCard(
                                   title: _playerTwoName,
                                   subtitle: 'Player 2',
                                   card: cards[1],
@@ -1067,7 +1029,7 @@ class _StoryPromptDemoPageState extends State<StoryPromptDemoPage> {
                     ],
                     const SizedBox(height: 20),
                     Text(
-                      'Demo note: the production path is the paired story flow, which writes to RTDB and calls a backend function via STORY_PAIR_ACTION_URL.',
+                      'Demo note: the production path writes the pair prompt to RTDB and waits for story on that pair record.',
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: _demoMutedInk,
                         height: 1.4,
@@ -1084,7 +1046,7 @@ class _StoryPromptDemoPageState extends State<StoryPromptDemoPage> {
   }
 }
 
-class StoryPairSessionPage extends StatefulWidget {
+class StoryPairSessionPage extends StatelessWidget {
   StoryPairSessionPage({
     super.key,
     required this.sessionId,
@@ -1094,12 +1056,10 @@ class StoryPairSessionPage extends StatefulWidget {
     StoryPromptCatalogService? promptCatalogService,
     StoryPromptCardDealer? cardDealer,
     RtdbService? rtdbService,
-    StoryPairActionService? actionService,
   })  : promptCatalogService =
             promptCatalogService ?? DatabaseStoryPromptCatalogService(),
         cardDealer = cardDealer ?? StoryPromptCardDealer(),
-        rtdbService = rtdbService ?? RtdbService(),
-        actionService = actionService ?? HttpStoryPairActionService();
+        rtdbService = rtdbService ?? RtdbService();
 
   final String sessionId;
   final PlayerRecord player;
@@ -1108,19 +1068,97 @@ class StoryPairSessionPage extends StatefulWidget {
   final StoryPromptCatalogService promptCatalogService;
   final StoryPromptCardDealer cardDealer;
   final RtdbService rtdbService;
-  final StoryPairActionService actionService;
 
   @override
-  State<StoryPairSessionPage> createState() => _StoryPairSessionPageState();
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        foregroundColor: _demoInk,
+        title: const Text('Story Cards'),
+      ),
+      body: DecoratedBox(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Color(0xFFF4ECDE),
+              Color(0xFFE8DED2),
+              Color(0xFFD9D3D8),
+            ],
+          ),
+        ),
+        child: SafeArea(
+          top: false,
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 820),
+                child: StoryPairPromptPanel(
+                  sessionId: sessionId,
+                  player: player,
+                  partnerId: partnerId,
+                  sessionRound: sessionRound,
+                  promptCatalogService: promptCatalogService,
+                  cardDealer: cardDealer,
+                  rtdbService: rtdbService,
+                  showMetadataPanel: true,
+                  showPairId: true,
+                  showNameField: true,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
-class _StoryPairSessionPageState extends State<StoryPairSessionPage> {
+class StoryPairPromptPanel extends StatefulWidget {
+  StoryPairPromptPanel({
+    super.key,
+    required this.sessionId,
+    required this.player,
+    required this.partnerId,
+    required this.sessionRound,
+    StoryPromptCatalogService? promptCatalogService,
+    StoryPromptCardDealer? cardDealer,
+    RtdbService? rtdbService,
+    this.showMetadataPanel = false,
+    this.showPairId = false,
+    this.showNameField = false,
+    this.promptCardSubtitle = 'Your category cards',
+  })  : promptCatalogService =
+            promptCatalogService ?? DatabaseStoryPromptCatalogService(),
+        cardDealer = cardDealer ?? StoryPromptCardDealer(),
+        rtdbService = rtdbService ?? RtdbService();
+
+  final String sessionId;
+  final PlayerRecord player;
+  final String partnerId;
+  final int sessionRound;
+  final StoryPromptCatalogService promptCatalogService;
+  final StoryPromptCardDealer cardDealer;
+  final RtdbService rtdbService;
+  final bool showMetadataPanel;
+  final bool showPairId;
+  final bool showNameField;
+  final String promptCardSubtitle;
+
+  @override
+  State<StoryPairPromptPanel> createState() => _StoryPairPromptPanelState();
+}
+
+class _StoryPairPromptPanelState extends State<StoryPairPromptPanel> {
   late final TextEditingController _nameController;
   StoryPromptCardData? _card;
   StoryPairResultRecord? _result;
   bool _loading = true;
   bool _submitting = false;
-  bool _requestingResult = false;
   bool _hasSubmittedSelections = false;
   String? _error;
   Timer? _poller;
@@ -1288,7 +1326,6 @@ class _StoryPairSessionPageState extends State<StoryPairSessionPage> {
         _hasSubmittedSelections = true;
       });
 
-      await _requestResultGeneration();
       _startPolling();
     } catch (error) {
       if (!mounted) return;
@@ -1324,10 +1361,6 @@ class _StoryPairSessionPageState extends State<StoryPairSessionPage> {
           return;
         }
       }
-
-      if (_hasSubmittedSelections) {
-        await _requestResultGeneration();
-      }
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -1336,188 +1369,143 @@ class _StoryPairSessionPageState extends State<StoryPairSessionPage> {
     }
   }
 
-  Future<void> _requestResultGeneration() async {
-    if (_requestingResult) return;
-    _requestingResult = true;
-
-    try {
-      final result = await widget.actionService.requestGeneration(
-        pairId: _pairId,
-      );
-      if (!mounted) return;
-      setState(() {
-        _result = result;
-      });
-      if (_hasTerminalResult(result)) {
-        _poller?.cancel();
-      }
-    } finally {
-      _requestingResult = false;
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final card = _card;
     final result = _result;
+    final showHeaderPanel =
+        widget.showMetadataPanel || widget.showPairId || widget.showNameField;
 
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        foregroundColor: _demoInk,
-        title: const Text('Story Cards'),
-      ),
-      body: DecoratedBox(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              Color(0xFFF4ECDE),
-              Color(0xFFE8DED2),
-              Color(0xFFD9D3D8),
-            ],
-          ),
-        ),
-        child: SafeArea(
-          top: false,
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
-            child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 820),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _DemoPanel(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Pick 1 item from each category card. When both players submit, the app calls your Firebase action and waits for the generated result.',
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              color: _demoInk,
-                              fontWeight: FontWeight.w800,
-                              height: 1.3,
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          Text(
-                            'Pair: $_pairId',
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: _demoMutedInk,
-                            ),
-                          ),
-                          const SizedBox(height: 14),
-                          TextField(
-                            controller: _nameController,
-                            enabled: !_hasSubmittedSelections,
-                            onChanged: (_) => setState(() {}),
-                            decoration: const InputDecoration(
-                              labelText: 'Your name',
-                              hintText: 'Enter your name',
-                            ),
-                          ),
-                        ],
-                      ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (showHeaderPanel) ...[
+          _DemoPanel(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (widget.showMetadataPanel)
+                  Text(
+                    'Pick 1 item from each category card. When both players submit, the app writes the two names and six choices on the pair, then waits for story.',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      color: _demoInk,
+                      fontWeight: FontWeight.w800,
+                      height: 1.3,
                     ),
-                    const SizedBox(height: 18),
-                    if (_loading)
-                      const Center(
-                        child: Padding(
-                          padding: EdgeInsets.symmetric(vertical: 40),
-                          child: CircularProgressIndicator(),
-                        ),
-                      )
-                    else if (card != null)
-                      _PlayerPromptCard(
-                        title: _playerName,
-                        subtitle: 'Your category cards',
-                        card: card,
-                        enabled: !_hasSubmittedSelections,
-                        onSelect: (choiceIndex, option) => _selectAnswer(
-                          choiceIndex: choiceIndex,
-                          option: option,
-                        ),
-                      ),
-                    if (card != null) ...[
-                      const SizedBox(height: 16),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: FilledButton(
-                          onPressed: _hasSubmittedSelections ||
-                                  _submitting ||
-                                  !card.isComplete
-                              ? null
-                              : _submitSelections,
-                          child: Text(
-                            _submitting
-                                ? 'Submitting...'
-                                : _hasSubmittedSelections
-                                    ? 'Submitted'
-                                    : 'Submit your 3 answers',
-                          ),
-                        ),
-                      ),
-                    ],
-                    if (_hasSubmittedSelections &&
-                        !_hasTerminalResult(result)) ...[
-                      const SizedBox(height: 14),
-                      _DemoPanel(
-                        child: Text(
-                          result?.isProcessing == true
-                              ? 'Your action is generating the result now.'
-                              : 'Your answers are saved. Waiting for the other player, then the app will call the action again until a result is ready.',
-                          style: theme.textTheme.bodyLarge?.copyWith(
-                            color: _demoInk,
-                            height: 1.4,
-                          ),
-                        ),
-                      ),
-                    ],
-                    if (_error != null) ...[
-                      const SizedBox(height: 16),
-                      _InlineError(message: _error!),
-                    ],
-                    if (result?.isError == true && result?.error != null) ...[
-                      const SizedBox(height: 16),
-                      _InlineError(message: result!.error!),
-                    ],
-                    if (result?.isComplete == true &&
-                        (result?.text ?? '').trim().isNotEmpty) ...[
-                      const SizedBox(height: 20),
-                      _DemoPanel(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Generated result',
-                              style: theme.textTheme.titleLarge?.copyWith(
-                                color: _demoInk,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            SelectableText(
-                              result!.text!,
-                              style: theme.textTheme.bodyLarge?.copyWith(
-                                color: _demoInk,
-                                height: 1.5,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
+                  ),
+                if (widget.showMetadataPanel && widget.showPairId)
+                  const SizedBox(height: 10),
+                if (widget.showPairId)
+                  Text(
+                    'Pair: $_pairId',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: _demoMutedInk,
+                    ),
+                  ),
+                if (widget.showNameField) ...[
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: _nameController,
+                    enabled: !_hasSubmittedSelections,
+                    onChanged: (_) => setState(() {}),
+                    decoration: const InputDecoration(
+                      labelText: 'Your name',
+                      hintText: 'Enter your name',
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 18),
+        ],
+        if (_loading)
+          const Center(
+            child: Padding(
+              padding: EdgeInsets.symmetric(vertical: 40),
+              child: CircularProgressIndicator(),
+            ),
+          )
+        else if (card != null)
+          StoryPlayerPromptCard(
+            title: _playerName,
+            subtitle: widget.promptCardSubtitle,
+            card: card,
+            enabled: !_hasSubmittedSelections,
+            onSelect: (choiceIndex, option) => _selectAnswer(
+              choiceIndex: choiceIndex,
+              option: option,
+            ),
+          ),
+        if (card != null) ...[
+          const SizedBox(height: 16),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: FilledButton(
+              onPressed:
+                  _hasSubmittedSelections || _submitting || !card.isComplete
+                      ? null
+                      : _submitSelections,
+              child: Text(
+                _submitting
+                    ? 'Submitting...'
+                    : _hasSubmittedSelections
+                        ? 'Submitted'
+                        : 'Submit your 3 answers',
               ),
             ),
           ),
-        ),
-      ),
+        ],
+        if (_hasSubmittedSelections && !_hasTerminalResult(result)) ...[
+          const SizedBox(height: 14),
+          _DemoPanel(
+            child: Text(
+              result?.isProcessing == true
+                  ? 'Your story is being generated now.'
+                  : 'Your answers are saved. Waiting for the other player and for story to appear on the pair record.',
+              style: theme.textTheme.bodyLarge?.copyWith(
+                color: _demoInk,
+                height: 1.4,
+              ),
+            ),
+          ),
+        ],
+        if (_error != null) ...[
+          const SizedBox(height: 16),
+          _InlineError(message: _error!),
+        ],
+        if (result?.isError == true && result?.error != null) ...[
+          const SizedBox(height: 16),
+          _InlineError(message: result!.error!),
+        ],
+        if (result?.isComplete == true &&
+            (result?.text ?? '').trim().isNotEmpty) ...[
+          const SizedBox(height: 20),
+          _DemoPanel(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Generated result',
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    color: _demoInk,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SelectableText(
+                  result!.text!,
+                  style: theme.textTheme.bodyLarge?.copyWith(
+                    color: _demoInk,
+                    height: 1.5,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ],
     );
   }
 }
@@ -1577,7 +1565,7 @@ class _DemoHero extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             Text(
-              'Each player gets 3 different categories. Every category card shows 3 items, so each player chooses 3 items out of 9 while the two players avoid category overlap.',
+              'Each player gets 3 category cards. When Firebase has enough categories the two hands avoid overlap, and when it does not the app still deals valid cards instead of failing.',
               style: bodyStyle?.copyWith(
                 color: _demoMutedInk,
                 height: 1.45,
@@ -1646,8 +1634,8 @@ class _NameField extends StatelessWidget {
   }
 }
 
-class _PlayerPromptCard extends StatelessWidget {
-  const _PlayerPromptCard({
+class StoryPlayerPromptCard extends StatelessWidget {
+  const StoryPlayerPromptCard({
     required this.title,
     required this.subtitle,
     required this.card,
@@ -1773,8 +1761,14 @@ class _PromptChoiceSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final textureAsset = _storyTextureAssetForSeed(seed);
     final toneColor = _storyToneColorForSeed(seed);
+    final toneHsl = HSLColor.fromColor(toneColor);
+    final accentColor = toneHsl
+        .withSaturation(min(toneHsl.saturation + 0.16, 1.0))
+        .withLightness(min(toneHsl.lightness + 0.12, 1.0))
+        .toColor();
+    final glowAlignment = _storyGlowAlignmentForSeed(seed);
+    final sweepAlignment = _storyGlowAlignmentForSeed('$seed-sweep');
     return Transform.rotate(
       angle: _storyCardRotationForSeed(seed),
       child: DecoratedBox(
@@ -1801,10 +1795,50 @@ class _PromptChoiceSection extends StatelessWidget {
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
-                      Image.asset(
-                        textureAsset,
-                        fit: BoxFit.cover,
-                        alignment: _storyImageAlignmentForSeed(seed),
+                      DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              Color.alphaBlend(
+                                toneColor.withValues(alpha: 0.72),
+                                const Color(0xFF16120F),
+                              ),
+                              Color.alphaBlend(
+                                accentColor.withValues(alpha: 0.30),
+                                const Color(0xFF342A21),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: RadialGradient(
+                            center: glowAlignment,
+                            radius: 1.0,
+                            colors: [
+                              accentColor.withValues(alpha: 0.34),
+                              Colors.transparent,
+                            ],
+                          ),
+                        ),
+                      ),
+                      DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: sweepAlignment,
+                            end:
+                                Alignment(-sweepAlignment.x, -sweepAlignment.y),
+                            colors: [
+                              Colors.white.withValues(alpha: 0.16),
+                              Colors.transparent,
+                              Colors.black.withValues(alpha: 0.22),
+                            ],
+                            stops: const [0, 0.44, 1],
+                          ),
+                        ),
                       ),
                       DecoratedBox(
                         decoration: BoxDecoration(

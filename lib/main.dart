@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'dart:ui';
-import 'dart:ui' as ui show Image;
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -58,6 +57,26 @@ String _textureAssetForSeed(String seed) {
 Color _toneColorForSeed(String seed) {
   final rng = Random(seed.hashCode & 0x7fffffff);
   return HSLColor.fromAHSL(1, rng.nextDouble() * 360, 0.46, 0.52).toColor();
+}
+
+int? _targetTextureDecodeWidth({
+  required BoxConstraints constraints,
+  required double devicePixelRatio,
+  required double scale,
+}) {
+  final boundedWidth = constraints.hasBoundedWidth && constraints.maxWidth > 0;
+  final boundedHeight =
+      constraints.hasBoundedHeight && constraints.maxHeight > 0;
+  if (!boundedWidth && !boundedHeight) return null;
+
+  final logicalMaxDimension = max(
+    boundedWidth ? constraints.maxWidth : 0,
+    boundedHeight ? constraints.maxHeight : 0,
+  );
+  final sampledDimension = logicalMaxDimension / max(scale, 1);
+  final paddedPhysicalDimension =
+      (sampledDimension * devicePixelRatio * 1.35).ceil();
+  return paddedPhysicalDimension.clamp(192, 768).toInt();
 }
 
 TextStyle? _scaledTextStyle(
@@ -1563,6 +1582,7 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
       catalog.pickUnused('icebreakers_level1', seenIds),
       catalog.pickUnused('activities_level1', seenIds),
       catalog.pickUnused('dating_questions_level1', seenIds),
+      storyModePromptItem,
     ];
   }
 
@@ -1888,7 +1908,9 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
     final catalog = _promptCatalog!;
     final me = _player!;
 
-    if (me.currentPromptRound == round && me.currentRoundPrompts.length == 3) {
+    if (me.currentPromptRound == round &&
+        me.currentRoundPrompts.length == 4 &&
+        me.currentRoundPrompts.last == storyModePromptId) {
       return;
     }
 
@@ -1897,7 +1919,8 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
 
     List<PromptItem> prompts;
     if (partnerRefreshed.currentPromptRound == round &&
-        partnerRefreshed.currentRoundPrompts.length == 3) {
+        partnerRefreshed.currentRoundPrompts.length == 4 &&
+        partnerRefreshed.currentRoundPrompts.last == storyModePromptId) {
       prompts = catalog.resolveIds(partnerRefreshed.currentRoundPrompts);
     } else {
       final seenIds = {
@@ -1911,7 +1934,7 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
           ? 'dating_questions_level1'
           : 'icebreakers_level2';
       final finalPrompt = catalog.pickUnused(finalSet, seenIds);
-      prompts = [icebreaker, activity, finalPrompt];
+      prompts = [icebreaker, activity, finalPrompt, storyModePromptItem];
     }
 
     final promptStorageValues = prompts.map((prompt) => prompt.id).toList();
@@ -2046,6 +2069,7 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
       case ScreenState.matching:
         _logBody('matching', 'Rendering matching view for session $_sessionId');
         return GameView(
+          sessionId: _sessionId,
           player: _player,
           session: _session,
           error: _error,
@@ -2054,17 +2078,21 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
           onContinueInteraction: _continueInteractionWithLevelTwoPrompts,
           onEndInteraction: _isLocalSandboxMode ? null : _endCurrentInteraction,
           promptCatalog: _promptCatalog,
+          storyPromptCatalogService:
+              DatabaseStoryPromptCatalogService(rtdbService: _service),
+          storyCardDealer: StoryPromptCardDealer(),
+          storyRtdbService: _service,
           forceMatchingMode: true,
           unpairedInstructions:
               'Share your code, then enter someone else\'s 4-character code to start talking.',
           codeEntryPrompt: 'Enter another person\'s 4-character code:',
           showInviteCodeCard: true,
-          onOpenStoryPair: _openStoryPairFlow,
           onRoundComplete: _isLocalSandboxMode ? _completeLocalRound : null,
         );
       case ScreenState.game:
         _logBody('game', 'Rendering game view for session $_sessionId');
         return GameView(
+          sessionId: _sessionId,
           player: _player,
           session: _session,
           error: _error,
@@ -2073,11 +2101,14 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
           onContinueInteraction: _continueInteractionWithLevelTwoPrompts,
           onEndInteraction: _isLocalSandboxMode ? null : _endCurrentInteraction,
           promptCatalog: _promptCatalog,
+          storyPromptCatalogService:
+              DatabaseStoryPromptCatalogService(rtdbService: _service),
+          storyCardDealer: StoryPromptCardDealer(),
+          storyRtdbService: _service,
           unpairedInstructions:
               'Share your code, then enter someone else\'s 4-character code to start talking.',
           codeEntryPrompt: 'Enter another person\'s 4-character code:',
           showInviteCodeCard: true,
-          onOpenStoryPair: _openStoryPairFlow,
           onRoundComplete: _isLocalSandboxMode ? _completeLocalRound : null,
         );
       case ScreenState.ended:
@@ -2112,6 +2143,7 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
       case Stage.matching:
         _logBody('preview-matching', 'Rendering preview matching view');
         return GameView(
+          sessionId: _sessionId,
           player: _player,
           session: _session,
           error: _error,
@@ -2119,6 +2151,10 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
           onDrawPrompt: _syncPromptDraw,
           onContinueInteraction: _continueInteractionWithLevelTwoPrompts,
           promptCatalog: _promptCatalog,
+          storyPromptCatalogService:
+              DatabaseStoryPromptCatalogService(rtdbService: _service),
+          storyCardDealer: StoryPromptCardDealer(),
+          storyRtdbService: _service,
           forceMatchingMode: true,
           unpairedInstructions:
               'Enter a 4-character code to open a conversation.',
@@ -2129,6 +2165,7 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
       case Stage.game:
         _logBody('preview-game', 'Rendering preview game view');
         return GameView(
+          sessionId: _sessionId,
           player: _player,
           session: _session,
           error: _error,
@@ -2136,6 +2173,10 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
           onDrawPrompt: _syncPromptDraw,
           onContinueInteraction: _continueInteractionWithLevelTwoPrompts,
           promptCatalog: _promptCatalog,
+          storyPromptCatalogService:
+              DatabaseStoryPromptCatalogService(rtdbService: _service),
+          storyCardDealer: StoryPromptCardDealer(),
+          storyRtdbService: _service,
           unpairedInstructions:
               'Enter a 4-character code to open a conversation.',
           codeEntryPrompt: 'Enter a 4-character code:',
@@ -2174,24 +2215,6 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
     setState(() {
       _player = refreshed;
     });
-  }
-
-  Future<void> _openStoryPairFlow() async {
-    if (_sessionId == null || _player == null || _player!.pairedWith == null) {
-      return;
-    }
-
-    final sessionRound = _session?.round ?? _player!.pairedRound ?? 1;
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (context) => StoryPairSessionPage(
-          sessionId: _sessionId!,
-          player: _player!,
-          partnerId: _player!.pairedWith!,
-          sessionRound: sessionRound,
-        ),
-      ),
-    );
   }
 
   void _completeLocalRound() {
@@ -3092,12 +3115,16 @@ class _WaitingViewState extends State<WaitingView>
 class GameView extends StatefulWidget {
   const GameView({
     super.key,
+    required this.sessionId,
     required this.player,
     required this.session,
     required this.onSubmitCode,
     required this.onDrawPrompt,
     required this.onContinueInteraction,
     required this.promptCatalog,
+    this.storyPromptCatalogService,
+    this.storyCardDealer,
+    this.storyRtdbService,
     required this.unpairedInstructions,
     required this.codeEntryPrompt,
     this.onEndInteraction,
@@ -3105,9 +3132,9 @@ class GameView extends StatefulWidget {
     this.forceMatchingMode = false,
     this.showInviteCodeCard = false,
     this.onRoundComplete,
-    this.onOpenStoryPair,
   });
 
+  final String? sessionId;
   final PlayerRecord? player;
   final SessionRecord? session;
   final Future<void> Function(String code) onSubmitCode;
@@ -3118,13 +3145,15 @@ class GameView extends StatefulWidget {
   final Future<void> Function() onContinueInteraction;
   final Future<void> Function()? onEndInteraction;
   final PromptCatalog? promptCatalog;
+  final StoryPromptCatalogService? storyPromptCatalogService;
+  final StoryPromptCardDealer? storyCardDealer;
+  final RtdbService? storyRtdbService;
   final String unpairedInstructions;
   final String codeEntryPrompt;
   final String? error;
   final bool forceMatchingMode;
   final bool showInviteCodeCard;
   final VoidCallback? onRoundComplete;
-  final Future<void> Function()? onOpenStoryPair;
 
   @override
   State<GameView> createState() => _GameViewState();
@@ -3343,7 +3372,7 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'Complete three prompts together, then wait for the next round to begin.',
+                              'Complete each card together, then wait for the next round to begin.',
                               style: TextStyle(color: _ink, height: 1.35),
                             ),
                             SizedBox(height: 10),
@@ -3631,6 +3660,16 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
             prompt: prompts[promptIndex].text,
             seed: '${prompts[promptIndex].id}-$promptIndex-${player?.id ?? ''}',
           );
+    final isStoryModeCard =
+        prompts.isNotEmpty && prompts[promptIndex].id == storyModePromptId;
+    final storyRtdbService = widget.storyRtdbService ?? RtdbService();
+    final storyPromptCatalogService = widget.storyPromptCatalogService ??
+        DatabaseStoryPromptCatalogService(rtdbService: storyRtdbService);
+    final storyCardDealer = widget.storyCardDealer ?? StoryPromptCardDealer();
+    final showEmbeddedStoryPanel = isStoryModeCard &&
+        widget.sessionId != null &&
+        player != null &&
+        player.pairedWith != null;
     _PaperCard? buildStackCard(String seedSuffix) {
       if (prompts.isEmpty) return null;
       return _PaperCard(
@@ -3664,146 +3703,197 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
           const SizedBox(height: 20),
           if (isPairedThisRound) ...[
             if (prompts.isNotEmpty) ...[
-              Center(
-                child: SizedBox(
-                  width: _gamePromptCanvasWidth,
-                  height: _gamePromptCanvasHeight,
-                  child: Stack(
-                    clipBehavior: Clip.none,
-                    children: [
-                      if (activePromptCard != null)
-                        Center(
-                          child: Transform(
-                            alignment: Alignment.center,
-                            transform: Matrix4.identity()
-                              ..translateByDouble(-14, 8, 0, 1)
-                              ..rotateZ(-0.11),
-                            child: Opacity(
-                              opacity: 0.9,
-                              child: buildStackCard('back-left'),
-                            ),
-                          ),
-                        ),
-                      if (activePromptCard != null)
-                        Center(
-                          child: Transform(
-                            alignment: Alignment.center,
-                            transform: Matrix4.identity()
-                              ..translateByDouble(10, 12, 0, 1)
-                              ..rotateZ(0.09),
-                            child: Opacity(
-                              opacity: 0.86,
-                              child: buildStackCard('back-right'),
-                            ),
-                          ),
-                        ),
-                      AnimatedBuilder(
-                        animation: _dropController,
-                        child: activePromptCard,
-                        builder: (context, child) {
-                          return Center(
+              if (showEmbeddedStoryPanel) ...[
+                StoryPairPromptPanel(
+                  key: ValueKey(
+                    'story-${widget.sessionId}-${player!.id}-${player!.pairedWith}-${player!.pairedRound ?? currentRound ?? 1}',
+                  ),
+                  sessionId: widget.sessionId!,
+                  player: player!,
+                  partnerId: player!.pairedWith!,
+                  sessionRound: player!.pairedRound ?? currentRound ?? 1,
+                  promptCatalogService: storyPromptCatalogService,
+                  cardDealer: storyCardDealer,
+                  rtdbService: storyRtdbService,
+                  promptCardSubtitle: 'Story mode',
+                ),
+                const SizedBox(height: 16),
+                if (!_interactionEnded) ...[
+                  _BlurMixButton(
+                    onPressed: (_submitting ||
+                            _nextCardCooldown > 0 ||
+                            waitingForPartnerDecision)
+                        ? null
+                        : _handleEndInteraction,
+                    seed: 'end-interaction',
+                    width: 220,
+                    height: 52,
+                    fillColor: _nextCardCooldown > 0
+                        ? const Color(0xFFD6D0C5)
+                        : _primaryButton,
+                    borderColor: _nextCardCooldown > 0
+                        ? const Color(0xFFC2B7A7)
+                        : _primaryButton,
+                    textColor: _nextCardCooldown > 0
+                        ? const Color(0xFF6F655B)
+                        : _offWhite,
+                    textSize: 18,
+                    textWeight: FontWeight.w800,
+                    leadingIcon:
+                        _nextCardCooldown > 0 ? Icons.lock_outline : null,
+                    disabledOpacity: _nextCardCooldown > 0 ? 1 : 0.55,
+                    label: _submitting
+                        ? 'Loading...'
+                        : waitingForPartnerDecision
+                            ? 'Waiting for them...'
+                            : _nextCardCooldown > 0
+                                ? 'Locked ${_nextCardCooldown}s'
+                                : endInteractionLabel,
+                  ),
+                  if (waitingForPartnerDecision) ...[
+                    const SizedBox(height: 10),
+                    const Text(
+                      'You picked keep going. Round 2 starts only if they do too.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: _ink, height: 1.35),
+                    ),
+                  ],
+                ],
+              ] else ...[
+                Center(
+                  child: SizedBox(
+                    width: _gamePromptCanvasWidth,
+                    height: _gamePromptCanvasHeight,
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        if (activePromptCard != null)
+                          Center(
                             child: Transform(
                               alignment: Alignment.center,
                               transform: Matrix4.identity()
-                                ..setEntry(3, 2, 0.001)
-                                ..translateByDouble(
-                                  _dropXOffset.value,
-                                  _dropYOffset.value,
-                                  0,
-                                  1,
-                                )
-                                ..rotateZ(_dropRotation.value)
-                                ..scaleByDouble(
-                                  _dropScale.value,
-                                  _dropScale.value,
-                                  1,
-                                  1,
-                                ),
-                              child: child,
+                                ..translateByDouble(-14, 8, 0, 1)
+                                ..rotateZ(-0.11),
+                              child: Opacity(
+                                opacity: 0.9,
+                                child: buildStackCard('back-left'),
+                              ),
                             ),
-                          );
-                        },
-                      ),
-                    ],
+                          ),
+                        if (activePromptCard != null)
+                          Center(
+                            child: Transform(
+                              alignment: Alignment.center,
+                              transform: Matrix4.identity()
+                                ..translateByDouble(10, 12, 0, 1)
+                                ..rotateZ(0.09),
+                              child: Opacity(
+                                opacity: 0.86,
+                                child: buildStackCard('back-right'),
+                              ),
+                            ),
+                          ),
+                        AnimatedBuilder(
+                          animation: _dropController,
+                          child: activePromptCard,
+                          builder: (context, child) {
+                            return Center(
+                              child: Transform(
+                                alignment: Alignment.center,
+                                transform: Matrix4.identity()
+                                  ..setEntry(3, 2, 0.001)
+                                  ..translateByDouble(
+                                    _dropXOffset.value,
+                                    _dropYOffset.value,
+                                    0,
+                                    1,
+                                  )
+                                  ..rotateZ(_dropRotation.value)
+                                  ..scaleByDouble(
+                                    _dropScale.value,
+                                    _dropScale.value,
+                                    1,
+                                    1,
+                                  ),
+                                child: child,
+                              ),
+                            );
+                          },
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 10),
-              if (!_interactionEnded && hasMorePrompts)
-                _BlurMixButton(
-                  onPressed: (_submitting || _nextCardCooldown > 0)
-                      ? null
-                      : _drawNextPrompt,
-                  seed: 'draw-next-card',
-                  width: 220,
-                  height: 52,
-                  fillColor: _nextCardCooldown > 0
-                      ? const Color(0xFFD6D0C5)
-                      : _primaryButton,
-                  borderColor: _nextCardCooldown > 0
-                      ? const Color(0xFFC2B7A7)
-                      : _primaryButton,
-                  textColor: _nextCardCooldown > 0
-                      ? const Color(0xFF6F655B)
-                      : _offWhite,
-                  textSize: 18,
-                  textWeight: FontWeight.w800,
-                  leadingIcon:
-                      _nextCardCooldown > 0 ? Icons.lock_outline : null,
-                  disabledOpacity: _nextCardCooldown > 0 ? 1 : 0.55,
-                  label: _submitting
-                      ? 'Loading next prompt...'
-                      : _nextCardCooldown > 0
-                          ? 'Locked ${_nextCardCooldown}s'
-                          : 'Next prompt',
-                )
-              else if (!_interactionEnded) ...[
-                _BlurMixButton(
-                  onPressed: (_submitting ||
-                          _nextCardCooldown > 0 ||
-                          waitingForPartnerDecision)
-                      ? null
-                      : _handleEndInteraction,
-                  seed: 'end-interaction',
-                  width: 220,
-                  height: 52,
-                  fillColor: _nextCardCooldown > 0
-                      ? const Color(0xFFD6D0C5)
-                      : _primaryButton,
-                  borderColor: _nextCardCooldown > 0
-                      ? const Color(0xFFC2B7A7)
-                      : _primaryButton,
-                  textColor: _nextCardCooldown > 0
-                      ? const Color(0xFF6F655B)
-                      : _offWhite,
-                  textSize: 18,
-                  textWeight: FontWeight.w800,
-                  leadingIcon:
-                      _nextCardCooldown > 0 ? Icons.lock_outline : null,
-                  disabledOpacity: _nextCardCooldown > 0 ? 1 : 0.55,
-                  label: _submitting
-                      ? 'Loading...'
-                      : waitingForPartnerDecision
-                          ? 'Waiting for them...'
-                          : _nextCardCooldown > 0
-                              ? 'Locked ${_nextCardCooldown}s'
-                              : endInteractionLabel,
-                ),
-                if (waitingForPartnerDecision) ...[
-                  const SizedBox(height: 10),
-                  const Text(
-                    'You picked keep going. Round 2 starts only if they do too.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: _ink, height: 1.35),
+                const SizedBox(height: 10),
+                if (!_interactionEnded && hasMorePrompts)
+                  _BlurMixButton(
+                    onPressed: (_submitting || _nextCardCooldown > 0)
+                        ? null
+                        : _drawNextPrompt,
+                    seed: 'draw-next-card',
+                    width: 220,
+                    height: 52,
+                    fillColor: _nextCardCooldown > 0
+                        ? const Color(0xFFD6D0C5)
+                        : _primaryButton,
+                    borderColor: _nextCardCooldown > 0
+                        ? const Color(0xFFC2B7A7)
+                        : _primaryButton,
+                    textColor: _nextCardCooldown > 0
+                        ? const Color(0xFF6F655B)
+                        : _offWhite,
+                    textSize: 18,
+                    textWeight: FontWeight.w800,
+                    leadingIcon:
+                        _nextCardCooldown > 0 ? Icons.lock_outline : null,
+                    disabledOpacity: _nextCardCooldown > 0 ? 1 : 0.55,
+                    label: _submitting
+                        ? 'Loading next prompt...'
+                        : _nextCardCooldown > 0
+                            ? 'Locked ${_nextCardCooldown}s'
+                            : 'Next prompt',
+                  )
+                else if (!_interactionEnded) ...[
+                  _BlurMixButton(
+                    onPressed: (_submitting ||
+                            _nextCardCooldown > 0 ||
+                            waitingForPartnerDecision)
+                        ? null
+                        : _handleEndInteraction,
+                    seed: 'end-interaction',
+                    width: 220,
+                    height: 52,
+                    fillColor: _nextCardCooldown > 0
+                        ? const Color(0xFFD6D0C5)
+                        : _primaryButton,
+                    borderColor: _nextCardCooldown > 0
+                        ? const Color(0xFFC2B7A7)
+                        : _primaryButton,
+                    textColor: _nextCardCooldown > 0
+                        ? const Color(0xFF6F655B)
+                        : _offWhite,
+                    textSize: 18,
+                    textWeight: FontWeight.w800,
+                    leadingIcon:
+                        _nextCardCooldown > 0 ? Icons.lock_outline : null,
+                    disabledOpacity: _nextCardCooldown > 0 ? 1 : 0.55,
+                    label: _submitting
+                        ? 'Loading...'
+                        : waitingForPartnerDecision
+                            ? 'Waiting for them...'
+                            : _nextCardCooldown > 0
+                                ? 'Locked ${_nextCardCooldown}s'
+                                : endInteractionLabel,
                   ),
+                  if (waitingForPartnerDecision) ...[
+                    const SizedBox(height: 10),
+                    const Text(
+                      'You picked keep going. Round 2 starts only if they do too.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: _ink, height: 1.35),
+                    ),
+                  ],
                 ],
-              ],
-              if (widget.onOpenStoryPair != null) ...[
-                const SizedBox(height: 12),
-                OutlinedButton(
-                  onPressed: widget.onOpenStoryPair,
-                  child: const Text('Open story cards'),
-                ),
               ],
             ] else
               const Padding(
@@ -4227,30 +4317,18 @@ class _HeartTimerLoader extends StatefulWidget {
 class _HeartTimerLoaderState extends State<_HeartTimerLoader>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
-  late final String _textureAsset;
   late final Color _toneColor;
-  ui.Image? _textureImage;
 
   @override
   void initState() {
     super.initState();
     final seed =
         'heart-rate-${DateTime.now().microsecondsSinceEpoch}-${Random().nextInt(1 << 20)}';
-    _textureAsset = _textureAssetForSeed(seed);
     _toneColor = _toneColorForSeed('$seed-tone');
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 2800),
     )..repeat();
-    _loadTextureImage();
-  }
-
-  Future<void> _loadTextureImage() async {
-    final byteData = await rootBundle.load(_textureAsset);
-    final codec = await instantiateImageCodec(byteData.buffer.asUint8List());
-    final frame = await codec.getNextFrame();
-    if (!mounted) return;
-    setState(() => _textureImage = frame.image);
   }
 
   @override
@@ -4270,7 +4348,6 @@ class _HeartTimerLoaderState extends State<_HeartTimerLoader>
           return CustomPaint(
             painter: _HeartRateBarPainter(
               progress: _controller.value,
-              textureImage: _textureImage,
               toneColor: _toneColor,
             ),
             child: const SizedBox.expand(),
@@ -4284,12 +4361,10 @@ class _HeartTimerLoaderState extends State<_HeartTimerLoader>
 class _HeartRateBarPainter extends CustomPainter {
   const _HeartRateBarPainter({
     required this.progress,
-    required this.textureImage,
     required this.toneColor,
   });
 
   final double progress;
-  final ui.Image? textureImage;
   final Color toneColor;
 
   @override
@@ -4367,7 +4442,6 @@ class _HeartRateBarPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _HeartRateBarPainter oldDelegate) {
     return oldDelegate.progress != progress ||
-        oldDelegate.textureImage != textureImage ||
         oldDelegate.toneColor != toneColor;
   }
 }
@@ -4633,47 +4707,59 @@ class _ChatGptTextureBackdrop extends StatelessWidget {
     final rotation = (rng.nextDouble() * 2 - 1) * (pi / 24);
     final scale = minScale + (rng.nextDouble() * (maxScale - minScale));
     final blurSigma = 1.4 + (rng.nextDouble() * 1.4);
-
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        ClipRect(
-          child: ImageFiltered(
-            imageFilter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
-            child: Transform.rotate(
-              angle: rotation,
-              child: Transform.scale(
-                scale: scale,
-                child: Image.asset(
-                  resolvedTextureAsset,
-                  fit: BoxFit.cover,
-                  alignment: alignment,
-                  filterQuality: FilterQuality.low,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final devicePixelRatio = MediaQuery.maybeDevicePixelRatioOf(context) ??
+            View.of(context).devicePixelRatio;
+        final targetDecodeWidth = _targetTextureDecodeWidth(
+          constraints: constraints,
+          devicePixelRatio: devicePixelRatio,
+          scale: scale,
+        );
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            ClipRect(
+              child: ImageFiltered(
+                imageFilter:
+                    ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
+                child: Transform.rotate(
+                  angle: rotation,
+                  child: Transform.scale(
+                    scale: scale,
+                    child: Image.asset(
+                      resolvedTextureAsset,
+                      fit: BoxFit.cover,
+                      alignment: alignment,
+                      cacheWidth: targetDecodeWidth,
+                      filterQuality: FilterQuality.low,
+                    ),
+                  ),
                 ),
               ),
             ),
-          ),
-        ),
-        if (applyTintOverlay)
-          DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Color.alphaBlend(
-                    toneColor.withValues(alpha: 0.24 * gradientOpacity),
-                    Colors.black.withValues(alpha: 0.36),
+            if (applyTintOverlay)
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Color.alphaBlend(
+                        toneColor.withValues(alpha: 0.24 * gradientOpacity),
+                        Colors.black.withValues(alpha: 0.36),
+                      ),
+                      Color.alphaBlend(
+                        toneColor.withValues(alpha: 0.34 * gradientOpacity),
+                        Colors.black.withValues(alpha: 0.62),
+                      ),
+                    ],
                   ),
-                  Color.alphaBlend(
-                    toneColor.withValues(alpha: 0.34 * gradientOpacity),
-                    Colors.black.withValues(alpha: 0.62),
-                  ),
-                ],
+                ),
               ),
-            ),
-          ),
-      ],
+          ],
+        );
+      },
     );
   }
 }

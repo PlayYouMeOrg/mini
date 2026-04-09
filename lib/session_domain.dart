@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 const _databaseBaseUrl = 'https://youmedev-feab4-default-rtdb.firebaseio.com';
 const _firestoreProjectId = 'youmedev-feab4';
+const _promptCatalogPath = 'mini/prompts';
 
 Future<String?> _firebaseIdToken() async {
   try {
@@ -41,6 +42,12 @@ extension RoundPreferenceLabel on RoundPreference {
   String get label =>
       this == RoundPreference.openingUp ? 'Opening up' : 'Playful';
 }
+
+const storyModePromptId = '__story_mode__';
+const storyModePromptItem = PromptItem(
+  id: storyModePromptId,
+  text: 'Story mode\nOpen the final card together to build your story.',
+);
 
 class SignupPayload {
   const SignupPayload({
@@ -549,9 +556,42 @@ class RtdbService {
   }
 
   Future<StoryPairResultRecord?> fetchStoryPairResult(String pairId) async {
-    final payload = await fetchValue('mini/storyPairs/$pairId/result');
+    final payload = await fetchValue('mini/storyPairs/$pairId');
     if (payload is! Map<String, dynamic>) return null;
-    return StoryPairResultRecord.fromJson(payload);
+
+    final story = (payload['story'] as String?)?.trim();
+    if (story != null && story.isNotEmpty) {
+      return StoryPairResultRecord(
+        status: 'complete',
+        text: story,
+        completedAt: (payload['storyCompletedAt'] as num?)?.toInt() ??
+            (payload['updatedAt'] as num?)?.toInt(),
+      );
+    }
+
+    final storyError = (payload['storyError'] as String?)?.trim();
+    if (storyError != null && storyError.isNotEmpty) {
+      return StoryPairResultRecord(
+        status: 'error',
+        error: storyError,
+        completedAt: (payload['storyCompletedAt'] as num?)?.toInt(),
+      );
+    }
+
+    final legacyResult = payload['result'];
+    if (legacyResult is Map) {
+      return StoryPairResultRecord.fromJson(
+        Map<String, dynamic>.from(legacyResult),
+      );
+    }
+
+    final storyPrompt = (payload['storyPrompt'] as String?)?.trim();
+    if (payload['storyReady'] == true ||
+        (storyPrompt != null && storyPrompt.isNotEmpty)) {
+      return const StoryPairResultRecord(status: 'waiting');
+    }
+
+    return null;
   }
 
   Future<void> saveStoryPairPlayer({
@@ -571,6 +611,28 @@ class RtdbService {
     await patchValue(
       'mini/storyPairs/$pairId/players/${player.playerId}',
       player.toJson(),
+    );
+
+    final playersPayload = await fetchValue('mini/storyPairs/$pairId/players');
+    final players = playersPayload is Map
+        ? playersPayload.values
+            .whereType<Map>()
+            .map(
+              (item) => StoryPairPlayerRecord.fromJson(
+                Map<String, dynamic>.from(item),
+              ),
+            )
+            .toList()
+        : const <StoryPairPlayerRecord>[];
+    final storyPrompt = buildStoryPairPrompt(players);
+
+    await patchValue(
+      'mini/storyPairs/$pairId',
+      {
+        'storyPrompt': storyPrompt,
+        'storyReady': storyPrompt != null,
+        'updatedAt': DateTime.now().millisecondsSinceEpoch,
+      },
     );
   }
 
@@ -638,42 +700,137 @@ class PromptCatalog {
 
   List<PromptItem> resolveIds(List<String> promptIds) {
     return promptIds
-        .map((id) => itemsById[id] ?? PromptItem(id: id, text: id))
+        .map(
+          (id) => id == storyModePromptId
+              ? storyModePromptItem
+              : itemsById[id] ?? PromptItem(id: id, text: id),
+        )
         .toList();
   }
 }
 
-class PromptCatalogService {
-  Future<PromptCatalog> loadDatingCatalog() async {
-    final raw = await rootBundle.loadString('Prompts/Dating/prompt_set_x.json');
-    final decoded = jsonDecode(raw) as Map<String, dynamic>;
-    final mini = decoded['mini'] as Map<String, dynamic>?;
-    final prompts = mini?['prompts'] as Map<String, dynamic>?;
-    if (prompts == null) {
-      throw StateError('Missing mini.prompts in prompt_set_x.json');
+PromptCatalog parseDatingPromptCatalog(Object? raw) {
+  final promptRoot = _resolvePromptCatalogRoot(raw);
+  if (promptRoot is! Map) {
+    throw StateError('Expected a map at $_promptCatalogPath.');
+  }
+
+  final sets = <String, List<PromptItem>>{};
+  final itemsById = <String, PromptItem>{};
+
+  promptRoot.forEach((setId, value) {
+    if (value is! Map) return;
+
+    final promptItems = _extractPromptItems(value, setId.toString());
+    if (promptItems.isEmpty) return;
+
+    sets[setId.toString()] = promptItems;
+    for (final item in promptItems) {
+      itemsById[item.id] = item;
     }
+  });
 
-    final sets = <String, List<PromptItem>>{};
-    final itemsById = <String, PromptItem>{};
+  if (itemsById.isEmpty) {
+    throw StateError('No dating prompt sets found at $_promptCatalogPath.');
+  }
 
-    prompts.forEach((setId, value) {
-      final promptSet = value as Map<String, dynamic>?;
-      final promptItems = ((promptSet?['prompts'] as List?) ?? const [])
-          .map(
-            (item) => PromptItem(
-              id: (item['id'] ?? '').toString(),
-              text: (item['text'] ?? '').toString(),
-            ),
-          )
-          .where((item) => item.id.isNotEmpty && item.text.isNotEmpty)
-          .toList();
-      sets[setId] = promptItems;
-      for (final item in promptItems) {
-        itemsById[item.id] = item;
-      }
-    });
+  return PromptCatalog(sets: sets, itemsById: itemsById);
+}
 
-    return PromptCatalog(sets: sets, itemsById: itemsById);
+Object? _resolvePromptCatalogRoot(Object? raw) {
+  if (raw is! Map) return raw;
+
+  final prompts = _lookupCaseInsensitive(raw, 'prompts');
+  if (prompts != null) {
+    return _resolvePromptCatalogRoot(prompts);
+  }
+
+  final mini = _lookupCaseInsensitive(raw, 'mini');
+  if (mini != null) {
+    return _resolvePromptCatalogRoot(mini);
+  }
+
+  return raw;
+}
+
+List<PromptItem> _extractPromptItems(Map raw, String setId) {
+  final collection = _lookupCaseInsensitive(raw, 'prompts');
+  if (collection is! List) return const <PromptItem>[];
+
+  final promptItems = <PromptItem>[];
+  for (var index = 0; index < collection.length; index += 1) {
+    final item =
+        _parsePromptItem(collection[index], setId: setId, index: index);
+    if (item != null) {
+      promptItems.add(item);
+    }
+  }
+
+  return promptItems;
+}
+
+PromptItem? _parsePromptItem(
+  Object? raw, {
+  required String setId,
+  required int index,
+}) {
+  if (raw is String) {
+    final text = raw.trim();
+    if (text.isEmpty) return null;
+    return PromptItem(id: '$setId-${index + 1}', text: text);
+  }
+
+  if (raw is! Map) return null;
+
+  final resolvedText =
+      _firstNonEmptyString(raw, const ['text', 'prompt', 'value']);
+  if (resolvedText == null) return null;
+
+  final resolvedId =
+      _firstNonEmptyString(raw, const ['id']) ?? '$setId-${index + 1}';
+  return PromptItem(id: resolvedId, text: resolvedText);
+}
+
+Object? _lookupCaseInsensitive(Map raw, String key) {
+  for (final entry in raw.entries.cast<MapEntry<Object?, Object?>>()) {
+    if (entry.key.toString().toLowerCase() == key.toLowerCase()) {
+      return entry.value;
+    }
+  }
+  return null;
+}
+
+String? _firstNonEmptyString(Map raw, List<String> keys) {
+  for (final key in keys) {
+    final value = _lookupCaseInsensitive(raw, key);
+    if (value is! String) continue;
+    final normalized = value.trim();
+    if (normalized.isNotEmpty) {
+      return normalized;
+    }
+  }
+
+  return null;
+}
+
+class PromptCatalogService {
+  PromptCatalogService({
+    RtdbService? rtdbService,
+    this.path = _promptCatalogPath,
+  }) : _rtdbService = rtdbService ?? RtdbService();
+
+  final RtdbService _rtdbService;
+  final String path;
+
+  Future<PromptCatalog> loadDatingCatalog() async {
+    try {
+      final raw = await _rtdbService.fetchValue(path);
+      return parseDatingPromptCatalog(raw);
+    } catch (_) {
+      final raw =
+          await rootBundle.loadString('Prompts/Dating/prompt_set_x.json');
+      return parseDatingPromptCatalog(jsonDecode(raw));
+    }
   }
 }
 
@@ -774,6 +931,29 @@ class StoryPairPlayerRecord {
       completedAt: (json['completedAt'] as num?)?.toInt(),
     );
   }
+}
+
+String? buildStoryPairPrompt(Iterable<StoryPairPlayerRecord> players) {
+  final completedPlayers = players.where((player) => player.isComplete).toList()
+    ..sort((left, right) => left.playerId.compareTo(right.playerId));
+  if (completedPlayers.length != 2) return null;
+
+  return [
+    for (final player in completedPlayers) _storyPairPromptName(player),
+    for (final player in completedPlayers)
+      for (final choice in player.choices) _storyPairPromptChoice(choice),
+  ].join('\n');
+}
+
+String _storyPairPromptName(StoryPairPlayerRecord player) {
+  final name = player.name.trim();
+  return name.isNotEmpty ? name : player.playerId;
+}
+
+String _storyPairPromptChoice(StoryPairChoiceRecord choice) {
+  final label = (choice.category ?? choice.typeName).trim();
+  final selected = (choice.selectedOption ?? '').trim();
+  return label.isEmpty ? selected : '$label: $selected';
 }
 
 class StoryPairResultRecord {
