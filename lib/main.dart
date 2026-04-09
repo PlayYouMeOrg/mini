@@ -3167,6 +3167,7 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
   bool _interactionEnded = false;
   int? _seenRound;
   int _animatedPromptIndex = 0;
+  bool _hasStartedPromptDrop = false;
   String? _shownInstructionsKey;
   Timer? _nextCardTimer;
   int _nextCardCooldown = 0;
@@ -3201,6 +3202,7 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
     if (round != _seenRound) {
       _seenRound = round;
       _animatedPromptIndex = 0;
+      _hasStartedPromptDrop = false;
       _interactionEnded = false;
       _restartNextCardCooldown();
       if (isPairedThisRound && prompts.isNotEmpty) {
@@ -3285,6 +3287,19 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
     _dropScale = Tween(begin: 0.94, end: 1.0)
         .chain(CurveTween(curve: Curves.easeOutCubic))
         .animate(_dropCurve);
+
+    final player = widget.player;
+    final sessionRound = widget.session?.round;
+    final isPairedThisRound = player?.pairedWith != null &&
+        player?.pairedRound != null &&
+        player!.pairedRound == sessionRound;
+    final prompts = widget.promptCatalog?.resolveIds(
+            player?.currentRoundPrompts ?? const <String>[]) ??
+        const <PromptItem>[];
+    if (isPairedThisRound && prompts.isNotEmpty) {
+      _playCardDropAnimation();
+    }
+
     _restartNextCardCooldown();
     _scheduleRoundInstructionsIfNeeded();
   }
@@ -3413,6 +3428,7 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
   }
 
   void _playCardDropAnimation() {
+    _hasStartedPromptDrop = true;
     _dropController
       ..reset()
       ..forward();
@@ -3660,6 +3676,7 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
             prompt: prompts[promptIndex].text,
             seed: '${prompts[promptIndex].id}-$promptIndex-${player?.id ?? ''}',
           );
+    final showPromptCards = _hasStartedPromptDrop && activePromptCard != null;
     final isStoryModeCard =
         prompts.isNotEmpty && prompts[promptIndex].id == storyModePromptId;
     final storyRtdbService = widget.storyRtdbService ?? RtdbService();
@@ -3767,7 +3784,7 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
                     child: Stack(
                       clipBehavior: Clip.none,
                       children: [
-                        if (activePromptCard != null)
+                        if (showPromptCards)
                           Center(
                             child: Transform(
                               alignment: Alignment.center,
@@ -3780,7 +3797,7 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
                               ),
                             ),
                           ),
-                        if (activePromptCard != null)
+                        if (showPromptCards)
                           Center(
                             child: Transform(
                               alignment: Alignment.center,
@@ -3793,33 +3810,34 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
                               ),
                             ),
                           ),
-                        AnimatedBuilder(
-                          animation: _dropController,
-                          child: activePromptCard,
-                          builder: (context, child) {
-                            return Center(
-                              child: Transform(
-                                alignment: Alignment.center,
-                                transform: Matrix4.identity()
-                                  ..setEntry(3, 2, 0.001)
-                                  ..translateByDouble(
-                                    _dropXOffset.value,
-                                    _dropYOffset.value,
-                                    0,
-                                    1,
-                                  )
-                                  ..rotateZ(_dropRotation.value)
-                                  ..scaleByDouble(
-                                    _dropScale.value,
-                                    _dropScale.value,
-                                    1,
-                                    1,
-                                  ),
-                                child: child,
-                              ),
-                            );
-                          },
-                        ),
+                        if (showPromptCards)
+                          AnimatedBuilder(
+                            animation: _dropController,
+                            child: activePromptCard,
+                            builder: (context, child) {
+                              return Center(
+                                child: Transform(
+                                  alignment: Alignment.center,
+                                  transform: Matrix4.identity()
+                                    ..setEntry(3, 2, 0.001)
+                                    ..translateByDouble(
+                                      _dropXOffset.value,
+                                      _dropYOffset.value,
+                                      0,
+                                      1,
+                                    )
+                                    ..rotateZ(_dropRotation.value)
+                                    ..scaleByDouble(
+                                      _dropScale.value,
+                                      _dropScale.value,
+                                      1,
+                                      1,
+                                    ),
+                                  child: child,
+                                ),
+                              );
+                            },
+                          ),
                       ],
                     ),
                   ),
