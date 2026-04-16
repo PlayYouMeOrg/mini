@@ -59,6 +59,36 @@ Color _toneColorForSeed(String seed) {
   return HSLColor.fromAHSL(1, rng.nextDouble() * 360, 0.46, 0.52).toColor();
 }
 
+class _PreviewStoryRtdbService extends RtdbService {
+  final Map<String, Map<String, StoryPairPlayerRecord>> _players =
+      <String, Map<String, StoryPairPlayerRecord>>{};
+  final Map<String, StoryPairResultRecord> _results =
+      <String, StoryPairResultRecord>{};
+
+  @override
+  Future<StoryPairPlayerRecord?> fetchStoryPairPlayer({
+    required String pairId,
+    required String playerId,
+  }) async {
+    return _players[pairId]?[playerId];
+  }
+
+  @override
+  Future<StoryPairResultRecord?> fetchStoryPairResult(String pairId) async {
+    return _results[pairId];
+  }
+
+  @override
+  Future<void> saveStoryPairPlayer({
+    required String pairId,
+    required StoryPairPlayerRecord player,
+  }) async {
+    _players.putIfAbsent(
+            pairId, () => <String, StoryPairPlayerRecord>{})[player.playerId] =
+        player;
+  }
+}
+
 int? _targetTextureDecodeWidth({
   required BoxConstraints constraints,
   required double devicePixelRatio,
@@ -127,6 +157,49 @@ TextTheme _buildAppTextTheme() {
     ),
     labelMedium: _scaledTextStyle(baseTextTheme.labelMedium),
     labelSmall: _scaledTextStyle(baseTextTheme.labelSmall),
+  );
+}
+
+const _backgroundTextShadows = [
+  Shadow(
+    color: Color(0xB3000000),
+    blurRadius: 14,
+    offset: Offset(0, 2),
+  ),
+];
+
+TextStyle _textOnBackgroundStyle(
+  TextStyle baseStyle, {
+  FontWeight? fontWeight,
+  double? fontSize,
+  double? height,
+}) {
+  return baseStyle.copyWith(
+    color: _offWhite,
+    fontWeight: fontWeight ?? baseStyle.fontWeight ?? FontWeight.w600,
+    fontSize: fontSize ?? baseStyle.fontSize,
+    height: height ?? baseStyle.height,
+    shadows: _backgroundTextShadows,
+  );
+}
+
+TextStyle _backgroundHeadlineStyle(BuildContext context) {
+  return _textOnBackgroundStyle(
+    Theme.of(context).textTheme.headlineSmall ?? const TextStyle(fontSize: 30),
+    fontWeight: FontWeight.w800,
+    height: 1.08,
+  );
+}
+
+TextStyle _backgroundBodyStyle(
+  BuildContext context, {
+  FontWeight fontWeight = FontWeight.w600,
+  double height = 1.35,
+}) {
+  return _textOnBackgroundStyle(
+    Theme.of(context).textTheme.bodyMedium ?? const TextStyle(fontSize: 16),
+    fontWeight: fontWeight,
+    height: height,
   );
 }
 
@@ -609,7 +682,7 @@ class _FatalErrorContent extends StatelessWidget {
   }
 }
 
-enum Stage { signup, waiting, matching, game, ended }
+enum Stage { signup, waiting, matching, game, story, ended }
 
 class SessionFlowServices {
   SessionFlowServices({
@@ -665,6 +738,8 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
   late final SessionStateStore _sessionStore;
   late final Uri _initialUri;
   late final LaunchIntent _launchIntent;
+  late final StoryPromptCatalogService _databaseStoryPromptCatalogService;
+  late final RtdbService _previewStoryRtdbService;
 
   Stage _stage = Stage.signup;
   ScreenState _screenState = ScreenState.booting;
@@ -693,6 +768,11 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
         text: 'What kind of vibe helps you feel most yourself on a date?'),
   ];
 
+  static const _previewRoundPromptSet = [
+    ..._previewPromptSet,
+    storyModePromptItem,
+  ];
+
   static const _previewLevelTwoPromptSet = [
     PromptItem(
         id: 'preview-4',
@@ -718,6 +798,9 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
     _sessionStore = services?.sessionStateStore ?? SessionStateStore();
     _initialUri = widget.initialUri ?? Uri.base;
     _launchIntent = LaunchIntent.fromUri(_initialUri);
+    _databaseStoryPromptCatalogService =
+        DatabaseStoryPromptCatalogService(rtdbService: _service);
+    _previewStoryRtdbService = _PreviewStoryRtdbService();
     _sessionId = _launchIntent.sessionId;
 
     _logAppEvent(
@@ -796,8 +879,10 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
       pairedRound: 1,
       currentPromptRound: 1,
       currentPromptIndex: 0,
-      currentRoundPrompts: _previewPromptSet.map((item) => item.id).toList(),
-      askedPromptIds: _previewPromptSet.map((item) => item.id).toList(),
+      activeTurnPlayerId: 'preview-player',
+      currentRoundPrompts:
+          _previewRoundPromptSet.map((item) => item.id).toList(),
+      askedPromptIds: _previewRoundPromptSet.map((item) => item.id).toList(),
       seeAgainPlayerIds: const ['preview-match-1'],
     );
 
@@ -825,12 +910,12 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
       ];
       _promptCatalog = PromptCatalog(
         sets: {
-          'preview': _previewPromptSet,
+          'preview': _previewRoundPromptSet,
           'icebreakers_level2': _previewLevelTwoPromptSet,
         },
         itemsById: {
           for (final item in [
-            ..._previewPromptSet,
+            ..._previewRoundPromptSet,
             ..._previewLevelTwoPromptSet
           ])
             item.id: item,
@@ -905,6 +990,8 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
       case Stage.matching:
         return ScreenState.matching;
       case Stage.game:
+        return ScreenState.game;
+      case Stage.story:
         return ScreenState.game;
       case Stage.ended:
         return ScreenState.ended;
@@ -1025,10 +1112,12 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
             ..pairedRound = null
             ..interactionRound = _initialInteractionRound
             ..continueVoteRound = null
+            ..activeTurnPlayerId = null
+            ..skipNextTurn = false
             ..currentPromptIndex = 0
             ..currentPromptRound = 1
             ..currentRoundPrompts =
-                _previewPromptSet.map((item) => item.id).toList();
+                _previewRoundPromptSet.map((item) => item.id).toList();
           _error = null;
           break;
         case Stage.matching:
@@ -1039,10 +1128,12 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
             ..pairedRound = null
             ..interactionRound = _initialInteractionRound
             ..continueVoteRound = null
+            ..activeTurnPlayerId = null
+            ..skipNextTurn = false
             ..currentPromptRound = 1
             ..currentPromptIndex = 0
             ..currentRoundPrompts =
-                _previewPromptSet.map((item) => item.id).toList();
+                _previewRoundPromptSet.map((item) => item.id).toList();
           _error = null;
           break;
         case Stage.game:
@@ -1053,10 +1144,28 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
             ..pairedRound = 1
             ..interactionRound = _initialInteractionRound
             ..continueVoteRound = null
+            ..activeTurnPlayerId = _player!.id
+            ..skipNextTurn = false
             ..currentPromptRound = 1
             ..currentPromptIndex = 0
             ..currentRoundPrompts =
-                _previewPromptSet.map((item) => item.id).toList();
+                _previewRoundPromptSet.map((item) => item.id).toList();
+          _error = null;
+          break;
+        case Stage.story:
+          _session = SessionRecord(status: 'started', round: 1);
+          _player ??= _buildPreviewPlayer();
+          _player!
+            ..pairedWith = 'preview-partner'
+            ..pairedRound = 1
+            ..interactionRound = _initialInteractionRound
+            ..continueVoteRound = null
+            ..activeTurnPlayerId = null
+            ..skipNextTurn = false
+            ..currentPromptRound = 1
+            ..currentPromptIndex = _previewRoundPromptSet.length - 1
+            ..currentRoundPrompts =
+                _previewRoundPromptSet.map((item) => item.id).toList();
           _error = null;
           break;
         case Stage.ended:
@@ -1089,8 +1198,10 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
       roundPreference: RoundPreference.playful,
       inviteCode: 'UI42',
       currentPromptRound: 1,
-      currentRoundPrompts: _previewPromptSet.map((item) => item.id).toList(),
-      askedPromptIds: _previewPromptSet.map((item) => item.id).toList(),
+      activeTurnPlayerId: 'preview-player',
+      currentRoundPrompts:
+          _previewRoundPromptSet.map((item) => item.id).toList(),
+      askedPromptIds: _previewRoundPromptSet.map((item) => item.id).toList(),
     );
   }
 
@@ -1422,7 +1533,9 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
         final previousPlayer = _player;
 
         if (roundChanged &&
-            (_stage == Stage.game || _stage == Stage.matching)) {
+            (_stage == Stage.game ||
+                _stage == Stage.story ||
+                _stage == Stage.matching)) {
           final previousPartnerId = previousPlayer?.pairedWith;
           await _service.clearPairing(_sessionId!, _playerId!);
           player.pairedWith = null;
@@ -1430,6 +1543,8 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
           player.partnerCode = null;
           player.interactionRound = _initialInteractionRound;
           player.continueVoteRound = null;
+          player.activeTurnPlayerId = null;
+          player.skipNextTurn = false;
 
           if (previousPartnerId != null) {
             unawaited(_showRoundEndedDialog(previousPartnerId));
@@ -1457,6 +1572,30 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
               sessionRound: session.round!,
             );
             if (advanced) {
+              syncedPlayer =
+                  await _service.fetchPlayer(_sessionId!, _playerId!);
+            }
+          } catch (_) {
+            // Ignore transient partner lookup failures and keep polling.
+          }
+        }
+
+        if (!roundChanged &&
+            _isSessionLive(session.status) &&
+            syncedPlayer.pairedWith != null &&
+            syncedPlayer.pairedRound == session.round &&
+            session.round != null) {
+          try {
+            final partner = await _service.fetchPlayer(
+              _sessionId!,
+              syncedPlayer.pairedWith!,
+            );
+            final skipped = await _maybeConsumeQueuedSkipTurn(
+              me: syncedPlayer,
+              partner: partner,
+              sessionRound: session.round!,
+            );
+            if (skipped) {
               syncedPlayer =
                   await _service.fetchPlayer(_sessionId!, _playerId!);
             }
@@ -1516,6 +1655,8 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
           ..partnerCode = normalized
           ..interactionRound = _initialInteractionRound
           ..continueVoteRound = null
+          ..activeTurnPlayerId = _player!.id
+          ..skipNextTurn = false
           ..currentPromptRound = _session?.round ?? 1
           ..currentPromptIndex = 0
           ..currentRoundPrompts = prompts.map((item) => item.id).toList()
@@ -1578,12 +1719,26 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
     _promptCatalog ??= await _promptCatalogService.loadDatingCatalog();
     final catalog = _promptCatalog!;
     final seenIds = _player?.askedPromptIds.toSet() ?? <String>{};
-    return [
-      catalog.pickUnused('icebreakers_level1', seenIds),
-      catalog.pickUnused('activities_level1', seenIds),
-      catalog.pickUnused('dating_questions_level1', seenIds),
-      storyModePromptItem,
-    ];
+    final prompts = <PromptItem>[];
+
+    PromptItem pickFromSet(String setId) {
+      final prompt = catalog.pickUnused(
+        setId,
+        {
+          ...seenIds,
+          ...prompts.map((item) => item.id),
+        },
+      );
+      seenIds.add(prompt.id);
+      return prompt;
+    }
+
+    prompts
+      ..add(pickFromSet('icebreakers_level1'))
+      ..add(pickFromSet('activities_level1'))
+      ..add(pickFromSet('dating_questions_level1'))
+      ..add(storyModePromptItem);
+    return prompts;
   }
 
   List<PromptItem> _pickPromptBatch({
@@ -1625,6 +1780,150 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
     return selected;
   }
 
+  bool _hasStoryModePrompt(PlayerRecord player) {
+    return player.currentRoundPrompts.isNotEmpty &&
+        player.currentRoundPrompts.last == storyModePromptId;
+  }
+
+  int _normalPromptCount(PlayerRecord player) {
+    return _hasStoryModePrompt(player)
+        ? max(0, player.currentRoundPrompts.length - 1)
+        : player.currentRoundPrompts.length;
+  }
+
+  bool _hasRemainingNormalPrompt(PlayerRecord player) {
+    return player.currentPromptIndex < _normalPromptCount(player);
+  }
+
+  bool _isSharedStoryReady(PlayerRecord me, PlayerRecord partner) {
+    return _hasStoryModePrompt(me) &&
+        _hasStoryModePrompt(partner) &&
+        me.currentPromptIndex >= _normalPromptCount(me) &&
+        partner.currentPromptIndex >= _normalPromptCount(partner);
+  }
+
+  String _starterForInteraction({
+    required PlayerRecord me,
+    required PlayerRecord partner,
+    required int interactionRound,
+  }) {
+    final orderedIds = [me.id, partner.id]..sort();
+    return orderedIds[(interactionRound - 1) % orderedIds.length];
+  }
+
+  void _advanceOwnPromptIndex(PlayerRecord player) {
+    player.currentPromptIndex = min(
+      player.currentPromptIndex + 1,
+      player.currentRoundPrompts.length,
+    );
+  }
+
+  String? _resolveNextActiveTurnPlayerId({
+    required PlayerRecord active,
+    required PlayerRecord partner,
+  }) {
+    if (_isSharedStoryReady(active, partner)) {
+      return null;
+    }
+
+    PlayerRecord candidate = partner;
+    for (var i = 0; i < 4; i += 1) {
+      if (!_hasRemainingNormalPrompt(active) &&
+          !_hasRemainingNormalPrompt(partner)) {
+        return null;
+      }
+
+      if (_hasRemainingNormalPrompt(candidate)) {
+        if (candidate.skipNextTurn) {
+          candidate.skipNextTurn = false;
+          _advanceOwnPromptIndex(candidate);
+          if (_isSharedStoryReady(active, partner)) {
+            return null;
+          }
+          candidate = identical(candidate, active) ? partner : active;
+          continue;
+        }
+        return candidate.id;
+      }
+
+      candidate = identical(candidate, active) ? partner : active;
+    }
+
+    return null;
+  }
+
+  void _applyPromptDeck({
+    required PlayerRecord player,
+    required int round,
+    required int interactionRound,
+    required List<String> promptIds,
+    required List<String> askedPromptIds,
+    required String? activeTurnPlayerId,
+  }) {
+    player
+      ..interactionRound = interactionRound
+      ..continueVoteRound = null
+      ..currentPromptRound = round
+      ..currentPromptIndex = 0
+      ..activeTurnPlayerId = activeTurnPlayerId
+      ..skipNextTurn = false
+      ..currentRoundPrompts = List<String>.from(promptIds)
+      ..askedPromptIds = List<String>.from(askedPromptIds);
+  }
+
+  Future<void> _persistPairState({
+    required PlayerRecord me,
+    required PlayerRecord partner,
+  }) async {
+    if (_sessionId == null) return;
+    await _service.savePlayer(_sessionId!, me);
+    await _service.savePlayer(_sessionId!, partner);
+  }
+
+  Future<bool> _advancePromptTurnForPair({
+    required PlayerRecord active,
+    required PlayerRecord partner,
+  }) async {
+    if (_sessionId == null) return false;
+
+    active.skipNextTurn = false;
+    _advanceOwnPromptIndex(active);
+    final nextActiveTurnPlayerId = _resolveNextActiveTurnPlayerId(
+      active: active,
+      partner: partner,
+    );
+
+    active.activeTurnPlayerId = nextActiveTurnPlayerId;
+    partner.activeTurnPlayerId = nextActiveTurnPlayerId;
+
+    if (nextActiveTurnPlayerId == null) {
+      active.skipNextTurn = false;
+      partner.skipNextTurn = false;
+    }
+
+    await _persistPairState(me: active, partner: partner);
+    return true;
+  }
+
+  Future<bool> _maybeConsumeQueuedSkipTurn({
+    required PlayerRecord me,
+    required PlayerRecord partner,
+    required int sessionRound,
+  }) async {
+    if (_sessionId == null ||
+        me.pairedWith != partner.id ||
+        partner.pairedWith != me.id ||
+        me.pairedRound != sessionRound ||
+        partner.pairedRound != sessionRound ||
+        me.activeTurnPlayerId != me.id ||
+        !me.skipNextTurn ||
+        !_hasRemainingNormalPrompt(me)) {
+      return false;
+    }
+
+    return _advancePromptTurnForPair(active: me, partner: partner);
+  }
+
   Future<bool> _maybeAdvanceInteractionRound({
     required PlayerRecord me,
     required PlayerRecord partner,
@@ -1642,41 +1941,54 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
 
     _promptCatalog ??= await _promptCatalogService.loadDatingCatalog();
     final catalog = _promptCatalog!;
-    final prompts = _pickPromptBatch(
+    final usedIds = {
+      ...me.askedPromptIds,
+      ...partner.askedPromptIds,
+    };
+    final mePrompts = _pickPromptBatch(
       catalog: catalog,
       setId: 'icebreakers_level2',
-      usedIds: {
-        ...me.askedPromptIds,
-        ...partner.askedPromptIds,
-      },
+      usedIds: usedIds,
+    );
+    usedIds.addAll(mePrompts.map((item) => item.id));
+    final partnerPrompts = _pickPromptBatch(
+      catalog: catalog,
+      setId: 'icebreakers_level2',
+      usedIds: usedIds,
     );
 
-    final promptIds = prompts.map((item) => item.id).toList();
+    final mePromptIds = mePrompts.map((item) => item.id).toList();
+    final partnerPromptIds = partnerPrompts.map((item) => item.id).toList();
     final mergedHistory = {
       ...me.askedPromptIds,
       ...partner.askedPromptIds,
-      ...promptIds,
+      ...mePromptIds,
+      ...partnerPromptIds,
     }.toList();
-
-    await _service.updateRoundPrompts(
-      sessionId: _sessionId!,
-      playerId: me.id,
-      round: sessionRound,
+    final activeTurnPlayerId = _starterForInteraction(
+      me: me,
+      partner: partner,
       interactionRound: _finalInteractionRound,
-      continueVoteRound: null,
-      promptEntries: promptIds,
-      askedPromptIds: mergedHistory,
     );
 
-    await _service.updateRoundPrompts(
-      sessionId: _sessionId!,
-      playerId: partner.id,
+    _applyPromptDeck(
+      player: me,
       round: sessionRound,
       interactionRound: _finalInteractionRound,
-      continueVoteRound: null,
-      promptEntries: promptIds,
+      promptIds: mePromptIds,
       askedPromptIds: mergedHistory,
+      activeTurnPlayerId: activeTurnPlayerId,
     );
+    _applyPromptDeck(
+      player: partner,
+      round: sessionRound,
+      interactionRound: _finalInteractionRound,
+      promptIds: partnerPromptIds,
+      askedPromptIds: mergedHistory,
+      activeTurnPlayerId: activeTurnPlayerId,
+    );
+
+    await _persistPairState(me: me, partner: partner);
 
     return true;
   }
@@ -1697,15 +2009,18 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
 
       if (!mounted) return;
       setState(() {
+        final promptIds = prompts.map((item) => item.id).toList();
         _player!
           ..interactionRound = _finalInteractionRound
           ..continueVoteRound = null
+          ..activeTurnPlayerId = _player!.id
+          ..skipNextTurn = false
           ..currentPromptRound = _session?.round ?? 1
           ..currentPromptIndex = 0
-          ..currentRoundPrompts = prompts.map((item) => item.id).toList()
+          ..currentRoundPrompts = promptIds
           ..askedPromptIds = {
             ..._player!.askedPromptIds,
-            ...prompts.map((item) => item.id),
+            ...promptIds,
           }.toList();
         _error = null;
       });
@@ -1907,59 +2222,69 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
     _promptCatalog ??= await _promptCatalogService.loadDatingCatalog();
     final catalog = _promptCatalog!;
     final me = _player!;
-
+    final partnerRefreshed =
+        await _service.fetchPlayer(_sessionId!, partner.id);
     if (me.currentPromptRound == round &&
-        me.currentRoundPrompts.length == 4 &&
-        me.currentRoundPrompts.last == storyModePromptId) {
+        me.currentRoundPrompts.isNotEmpty &&
+        partnerRefreshed.currentPromptRound == round &&
+        partnerRefreshed.currentRoundPrompts.isNotEmpty) {
       return;
     }
 
-    final partnerRefreshed =
-        await _service.fetchPlayer(_sessionId!, partner.id);
+    final seenIds = {
+      ...me.askedPromptIds,
+      ...partnerRefreshed.askedPromptIds,
+    };
+    final finalSet = me.roundPreference == RoundPreference.openingUp &&
+            partnerRefreshed.roundPreference == RoundPreference.openingUp
+        ? 'dating_questions_level1'
+        : 'icebreakers_level2';
 
-    List<PromptItem> prompts;
-    if (partnerRefreshed.currentPromptRound == round &&
-        partnerRefreshed.currentRoundPrompts.length == 4 &&
-        partnerRefreshed.currentRoundPrompts.last == storyModePromptId) {
-      prompts = catalog.resolveIds(partnerRefreshed.currentRoundPrompts);
-    } else {
-      final seenIds = {
-        ...me.askedPromptIds,
-        ...partnerRefreshed.askedPromptIds,
-      };
+    List<PromptItem> buildDeck() {
       final icebreaker = catalog.pickUnused('icebreakers_level1', seenIds);
+      seenIds.add(icebreaker.id);
       final activity = catalog.pickUnused('activities_level1', seenIds);
-      final finalSet = me.roundPreference == RoundPreference.openingUp &&
-              partnerRefreshed.roundPreference == RoundPreference.openingUp
-          ? 'dating_questions_level1'
-          : 'icebreakers_level2';
+      seenIds.add(activity.id);
       final finalPrompt = catalog.pickUnused(finalSet, seenIds);
-      prompts = [icebreaker, activity, finalPrompt, storyModePromptItem];
+      seenIds.add(finalPrompt.id);
+      return [icebreaker, activity, finalPrompt, storyModePromptItem];
     }
 
-    final promptStorageValues = prompts.map((prompt) => prompt.id).toList();
+    final mePrompts = buildDeck();
+    final partnerPrompts = buildDeck();
+    final mePromptIds = mePrompts.map((prompt) => prompt.id).toList();
+    final partnerPromptIds = partnerPrompts.map((prompt) => prompt.id).toList();
 
     final mergedHistory = {
       ...me.askedPromptIds,
       ...partnerRefreshed.askedPromptIds,
-      ...prompts.map((prompt) => prompt.id),
+      ...mePromptIds,
+      ...partnerPromptIds,
     }.toList();
-
-    await _service.updateRoundPrompts(
-      sessionId: _sessionId!,
-      playerId: me.id,
-      round: round,
-      promptEntries: promptStorageValues,
-      askedPromptIds: mergedHistory,
+    final activeTurnPlayerId = _starterForInteraction(
+      me: me,
+      partner: partnerRefreshed,
+      interactionRound: _initialInteractionRound,
     );
 
-    await _service.updateRoundPrompts(
-      sessionId: _sessionId!,
-      playerId: partnerRefreshed.id,
+    _applyPromptDeck(
+      player: me,
       round: round,
-      promptEntries: promptStorageValues,
+      interactionRound: _initialInteractionRound,
+      promptIds: mePromptIds,
       askedPromptIds: mergedHistory,
+      activeTurnPlayerId: activeTurnPlayerId,
     );
+    _applyPromptDeck(
+      player: partnerRefreshed,
+      round: round,
+      interactionRound: _initialInteractionRound,
+      promptIds: partnerPromptIds,
+      askedPromptIds: mergedHistory,
+      activeTurnPlayerId: activeTurnPlayerId,
+    );
+
+    await _persistPairState(me: me, partner: partnerRefreshed);
   }
 
   @override
@@ -2075,11 +2400,11 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
           error: _error,
           onSubmitCode: _submitPartnerCode,
           onDrawPrompt: _syncPromptDraw,
+          onAskSameQuestion: _askSameQuestionAndSkipNextTurn,
           onContinueInteraction: _continueInteractionWithLevelTwoPrompts,
           onEndInteraction: _isLocalSandboxMode ? null : _endCurrentInteraction,
           promptCatalog: _promptCatalog,
-          storyPromptCatalogService:
-              DatabaseStoryPromptCatalogService(rtdbService: _service),
+          storyPromptCatalogService: _databaseStoryPromptCatalogService,
           storyCardDealer: StoryPromptCardDealer(),
           storyRtdbService: _service,
           forceMatchingMode: true,
@@ -2098,11 +2423,11 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
           error: _error,
           onSubmitCode: _submitPartnerCode,
           onDrawPrompt: _syncPromptDraw,
+          onAskSameQuestion: _askSameQuestionAndSkipNextTurn,
           onContinueInteraction: _continueInteractionWithLevelTwoPrompts,
           onEndInteraction: _isLocalSandboxMode ? null : _endCurrentInteraction,
           promptCatalog: _promptCatalog,
-          storyPromptCatalogService:
-              DatabaseStoryPromptCatalogService(rtdbService: _service),
+          storyPromptCatalogService: _databaseStoryPromptCatalogService,
           storyCardDealer: StoryPromptCardDealer(),
           storyRtdbService: _service,
           unpairedInstructions:
@@ -2149,12 +2474,12 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
           error: _error,
           onSubmitCode: _submitPartnerCode,
           onDrawPrompt: _syncPromptDraw,
+          onAskSameQuestion: _askSameQuestionAndSkipNextTurn,
           onContinueInteraction: _continueInteractionWithLevelTwoPrompts,
           promptCatalog: _promptCatalog,
-          storyPromptCatalogService:
-              DatabaseStoryPromptCatalogService(rtdbService: _service),
+          storyPromptCatalogService: _databaseStoryPromptCatalogService,
           storyCardDealer: StoryPromptCardDealer(),
-          storyRtdbService: _service,
+          storyRtdbService: _previewStoryRtdbService,
           forceMatchingMode: true,
           unpairedInstructions:
               'Enter a 4-character code to open a conversation.',
@@ -2171,12 +2496,33 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
           error: _error,
           onSubmitCode: _submitPartnerCode,
           onDrawPrompt: _syncPromptDraw,
+          onAskSameQuestion: _askSameQuestionAndSkipNextTurn,
           onContinueInteraction: _continueInteractionWithLevelTwoPrompts,
           promptCatalog: _promptCatalog,
-          storyPromptCatalogService:
-              DatabaseStoryPromptCatalogService(rtdbService: _service),
+          storyPromptCatalogService: _databaseStoryPromptCatalogService,
           storyCardDealer: StoryPromptCardDealer(),
-          storyRtdbService: _service,
+          storyRtdbService: _previewStoryRtdbService,
+          unpairedInstructions:
+              'Enter a 4-character code to open a conversation.',
+          codeEntryPrompt: 'Enter a 4-character code:',
+          showInviteCodeCard: true,
+          onRoundComplete: _completeLocalRound,
+        );
+      case Stage.story:
+        _logBody('preview-story', 'Rendering preview story view');
+        return GameView(
+          sessionId: _sessionId,
+          player: _player,
+          session: _session,
+          error: _error,
+          onSubmitCode: _submitPartnerCode,
+          onDrawPrompt: _syncPromptDraw,
+          onAskSameQuestion: _askSameQuestionAndSkipNextTurn,
+          onContinueInteraction: _continueInteractionWithLevelTwoPrompts,
+          promptCatalog: _promptCatalog,
+          storyPromptCatalogService: _databaseStoryPromptCatalogService,
+          storyCardDealer: StoryPromptCardDealer(),
+          storyRtdbService: _previewStoryRtdbService,
           unpairedInstructions:
               'Enter a 4-character code to open a conversation.',
           codeEntryPrompt: 'Enter a 4-character code:',
@@ -2195,25 +2541,59 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
   }) async {
     if (_isLocalSandboxMode) {
       if (_player == null) return;
+      final hasStoryMode = _player!.currentRoundPrompts.isNotEmpty &&
+          _player!.currentRoundPrompts.last == storyModePromptId;
+      final storyIndex = max(0, _player!.currentRoundPrompts.length - 1);
       setState(() {
         _player!.currentPromptIndex = promptIndex;
+        _player!.activeTurnPlayerId =
+            (hasStoryMode && promptIndex >= storyIndex) ||
+                    promptIndex >= _player!.currentRoundPrompts.length
+                ? null
+                : _player!.id;
       });
       return;
     }
 
     if (_sessionId == null || _player == null) return;
-
-    await _service.syncPromptIndexForPair(
-      sessionId: _sessionId!,
-      me: _player!,
-      partnerId: partnerId,
-      promptIndex: promptIndex,
-    );
+    final me = await _service.fetchPlayer(_sessionId!, _player!.id);
+    if (me.pairedWith != partnerId ||
+        (me.activeTurnPlayerId != null && me.activeTurnPlayerId != me.id)) {
+      return;
+    }
+    final partner = await _service.fetchPlayer(_sessionId!, partnerId);
+    await _advancePromptTurnForPair(active: me, partner: partner);
 
     final refreshed = await _service.fetchPlayer(_sessionId!, _player!.id);
     if (!mounted) return;
     setState(() {
       _player = refreshed;
+    });
+  }
+
+  Future<void> _askSameQuestionAndSkipNextTurn() async {
+    if (_player == null || _player!.skipNextTurn) return;
+
+    if (_isLocalSandboxMode) {
+      setState(() {
+        _player!.skipNextTurn = true;
+      });
+      return;
+    }
+
+    if (_sessionId == null || _playerId == null) return;
+
+    await _service.setSkipNextTurn(
+      sessionId: _sessionId!,
+      playerId: _playerId!,
+      skipNextTurn: true,
+    );
+
+    final refreshed = await _service.fetchPlayer(_sessionId!, _playerId!);
+    if (!mounted) return;
+    setState(() {
+      _player = refreshed;
+      _error = null;
     });
   }
 
@@ -2226,6 +2606,8 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
         ..partnerCode = null
         ..interactionRound = _initialInteractionRound
         ..continueVoteRound = null
+        ..activeTurnPlayerId = null
+        ..skipNextTurn = false
         ..currentPromptIndex = 0
         ..currentPromptRound = _session?.round ?? 1
         ..currentRoundPrompts = const <String>[];
@@ -2274,6 +2656,9 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
                     label: 'Game', onTap: () => _setPreviewStage(Stage.game)),
                 const SizedBox(width: 6),
                 _PreviewStageButton(
+                    label: 'Story', onTap: () => _setPreviewStage(Stage.story)),
+                const SizedBox(width: 6),
+                _PreviewStageButton(
                     label: 'Ended', onTap: () => _setPreviewStage(Stage.ended)),
               ],
             ),
@@ -2289,14 +2674,17 @@ class _BootstrapLoadingView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _HeartTimerLoader(),
-          SizedBox(height: 12),
-          Text('Connecting to session...'),
-        ],
+    return Center(
+      child: DefaultTextStyle.merge(
+        style: _backgroundBodyStyle(context),
+        child: const Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _HeartTimerLoader(),
+            SizedBox(height: 12),
+            Text('Connecting to session...'),
+          ],
+        ),
       ),
     );
   }
@@ -2999,115 +3387,114 @@ class _WaitingViewState extends State<WaitingView>
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        Text(
-          'Waiting Room',
-          textAlign: TextAlign.center,
-          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                color: _ink,
-              ),
-        ),
-        const SizedBox(height: 16),
-        FutureBuilder<LoveQuote>(
-          future: LoveQuotesRepository.pickRandomQuote(),
-          builder: (context, snapshot) {
-            final hasQuote = snapshot.hasData;
-            final quote = snapshot.data;
-            final quoteCard = _QuotePromptCard(
-              width: _waitingQuoteCardWidth,
-              height: _waitingQuoteCardHeight,
-              quote: hasQuote
-                  ? '“${quote!.quote}”'
-                  : 'Finding a quote for the room...',
-              author: hasQuote ? '- ${quote!.author}' : '',
-              seed: hasQuote ? quote!.quote : 'loading-quote',
-            );
-            return Center(
-              child: SizedBox(
-                width: _waitingQuoteCanvasWidth,
-                height: _waitingQuoteCanvasHeight,
-                child: Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    Center(
-                      child: Transform(
-                        alignment: Alignment.center,
-                        transform: Matrix4.identity()
-                          ..translateByDouble(-14, 8, 0, 1)
-                          ..rotateZ(-0.12),
-                        child: Opacity(
-                          opacity: 0.9,
-                          child: _QuotePromptCard(
-                            width: _waitingQuoteCardWidth,
-                            height: _waitingQuoteCardHeight,
-                            quote: '',
-                            author: '',
-                            seed: 'waiting-stack-back-left',
-                          ),
-                        ),
-                      ),
-                    ),
-                    Center(
-                      child: Transform(
-                        alignment: Alignment.center,
-                        transform: Matrix4.identity()
-                          ..translateByDouble(10, 12, 0, 1)
-                          ..rotateZ(0.08),
-                        child: Opacity(
-                          opacity: 0.86,
-                          child: _QuotePromptCard(
-                            width: _waitingQuoteCardWidth,
-                            height: _waitingQuoteCardHeight,
-                            quote: '',
-                            author: '',
-                            seed: 'waiting-stack-back-right',
-                          ),
-                        ),
-                      ),
-                    ),
-                    AnimatedBuilder(
-                      animation: _dropController,
-                      child: quoteCard,
-                      builder: (context, child) {
-                        return Transform(
+    final backgroundBodyStyle = _backgroundBodyStyle(context);
+    return DefaultTextStyle.merge(
+      style: backgroundBodyStyle,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Text(
+            'Waiting Room',
+            textAlign: TextAlign.center,
+            style: _backgroundHeadlineStyle(context),
+          ),
+          const SizedBox(height: 16),
+          FutureBuilder<LoveQuote>(
+            future: LoveQuotesRepository.pickRandomQuote(),
+            builder: (context, snapshot) {
+              final hasQuote = snapshot.hasData;
+              final quote = snapshot.data;
+              final quoteCard = _QuotePromptCard(
+                width: _waitingQuoteCardWidth,
+                height: _waitingQuoteCardHeight,
+                quote: hasQuote
+                    ? '“${quote!.quote}”'
+                    : 'Finding a quote for the room...',
+                author: hasQuote ? '- ${quote!.author}' : '',
+                seed: hasQuote ? quote!.quote : 'loading-quote',
+              );
+              return Center(
+                child: SizedBox(
+                  width: _waitingQuoteCanvasWidth,
+                  height: _waitingQuoteCanvasHeight,
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      Center(
+                        child: Transform(
                           alignment: Alignment.center,
                           transform: Matrix4.identity()
-                            ..setEntry(3, 2, 0.001)
-                            ..translateByDouble(
-                              _dropXOffset.value,
-                              _dropYOffset.value,
-                              0,
-                              1,
-                            )
-                            ..rotateZ(_dropRotation.value)
-                            ..scaleByDouble(
-                                _dropScale.value, _dropScale.value, 1, 1),
-                          child: child,
-                        );
-                      },
-                    ),
-                  ],
+                            ..translateByDouble(-14, 8, 0, 1)
+                            ..rotateZ(-0.12),
+                          child: Opacity(
+                            opacity: 0.9,
+                            child: _QuotePromptCard(
+                              width: _waitingQuoteCardWidth,
+                              height: _waitingQuoteCardHeight,
+                              quote: '',
+                              author: '',
+                              seed: 'waiting-stack-back-left',
+                            ),
+                          ),
+                        ),
+                      ),
+                      Center(
+                        child: Transform(
+                          alignment: Alignment.center,
+                          transform: Matrix4.identity()
+                            ..translateByDouble(10, 12, 0, 1)
+                            ..rotateZ(0.08),
+                          child: Opacity(
+                            opacity: 0.86,
+                            child: _QuotePromptCard(
+                              width: _waitingQuoteCardWidth,
+                              height: _waitingQuoteCardHeight,
+                              quote: '',
+                              author: '',
+                              seed: 'waiting-stack-back-right',
+                            ),
+                          ),
+                        ),
+                      ),
+                      AnimatedBuilder(
+                        animation: _dropController,
+                        child: quoteCard,
+                        builder: (context, child) {
+                          return Transform(
+                            alignment: Alignment.center,
+                            transform: Matrix4.identity()
+                              ..setEntry(3, 2, 0.001)
+                              ..translateByDouble(
+                                _dropXOffset.value,
+                                _dropYOffset.value,
+                                0,
+                                1,
+                              )
+                              ..rotateZ(_dropRotation.value)
+                              ..scaleByDouble(
+                                  _dropScale.value, _dropScale.value, 1, 1),
+                            child: child,
+                          );
+                        },
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            );
-          },
-        ),
-        const SizedBox(height: 28),
-        const Center(child: _HeartTimerLoader()),
-        const SizedBox(height: 12),
-        const Center(
-          child: Text(
-            'We are getting the next round ready.',
-            style: TextStyle(color: _ink),
+              );
+            },
           ),
-        ),
-        if (widget.error != null) ...[
+          const SizedBox(height: 28),
+          const Center(child: _HeartTimerLoader()),
           const SizedBox(height: 12),
-          Text(widget.error!, style: const TextStyle(color: Colors.red)),
-        ]
-      ],
+          const Center(
+            child: Text('We are getting the next round ready.'),
+          ),
+          if (widget.error != null) ...[
+            const SizedBox(height: 12),
+            Text(widget.error!, style: const TextStyle(color: Colors.red)),
+          ]
+        ],
+      ),
     );
   }
 }
@@ -3120,6 +3507,7 @@ class GameView extends StatefulWidget {
     required this.session,
     required this.onSubmitCode,
     required this.onDrawPrompt,
+    required this.onAskSameQuestion,
     required this.onContinueInteraction,
     required this.promptCatalog,
     this.storyPromptCatalogService,
@@ -3142,6 +3530,7 @@ class GameView extends StatefulWidget {
     required int promptIndex,
     required String partnerId,
   }) onDrawPrompt;
+  final Future<void> Function() onAskSameQuestion;
   final Future<void> Function() onContinueInteraction;
   final Future<void> Function()? onEndInteraction;
   final PromptCatalog? promptCatalog;
@@ -3163,11 +3552,15 @@ enum _InteractionDecision { keepGoing, endInteraction }
 
 class _GameViewState extends State<GameView> with TickerProviderStateMixin {
   final _codeCtrl = TextEditingController();
+  final Set<String> _readyStoryPairIds = <String>{};
+  final Set<String> _dismissedStoryPairIds = <String>{};
   bool _submitting = false;
   bool _interactionEnded = false;
   int? _seenRound;
   int _animatedPromptIndex = 0;
   bool _hasStartedPromptDrop = false;
+  String? _activeStoryRoutePairId;
+  Route<void>? _storyRoute;
   String? _shownInstructionsKey;
   Timer? _nextCardTimer;
   int _nextCardCooldown = 0;
@@ -3179,12 +3572,140 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
   late final Animation<double> _dropRotation;
   late final Animation<double> _dropScale;
 
+  String? _storyPairIdFor(PlayerRecord? player, int? sessionRound) {
+    if (widget.sessionId == null ||
+        player == null ||
+        player.pairedWith == null ||
+        sessionRound == null ||
+        !_isSharedStoryStage(player)) {
+      return null;
+    }
+
+    return buildStoryPairId(
+      sessionId: widget.sessionId!,
+      playerId: player.id,
+      partnerId: player.pairedWith!,
+      pairRound: player.pairedRound ?? sessionRound,
+    );
+  }
+
+  void _markStoryReady(String pairId) {
+    if (!mounted) return;
+    setState(() {
+      _readyStoryPairIds.add(pairId);
+    });
+  }
+
+  void _openStoryPage({
+    bool force = false,
+  }) {
+    final player = widget.player;
+    final sessionRound = widget.session?.round;
+    final pairId = _storyPairIdFor(player, sessionRound);
+    if (pairId == null ||
+        player == null ||
+        player.pairedWith == null ||
+        widget.sessionId == null) {
+      return;
+    }
+    if (!force && _dismissedStoryPairIds.contains(pairId)) {
+      return;
+    }
+    if (_activeStoryRoutePairId == pairId) {
+      return;
+    }
+
+    final pairRound = player.pairedRound ?? sessionRound!;
+    final storyRtdbService = widget.storyRtdbService ?? RtdbService();
+    final storyPromptCatalogService = widget.storyPromptCatalogService ??
+        DatabaseStoryPromptCatalogService(rtdbService: storyRtdbService);
+    final storyCardDealer = widget.storyCardDealer ?? StoryPromptCardDealer();
+
+    _dismissedStoryPairIds.remove(pairId);
+    _activeStoryRoutePairId = pairId;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+
+      final currentPairId =
+          _storyPairIdFor(widget.player, widget.session?.round);
+      if (currentPairId != pairId) {
+        if (_activeStoryRoutePairId == pairId) {
+          setState(() {
+            _activeStoryRoutePairId = null;
+          });
+        }
+        return;
+      }
+
+      final route = MaterialPageRoute<void>(
+        builder: (context) => StoryPairSessionPage(
+          sessionId: widget.sessionId!,
+          player: player,
+          partnerId: player.pairedWith!,
+          sessionRound: pairRound,
+          promptCatalogService: storyPromptCatalogService,
+          cardDealer: storyCardDealer,
+          rtdbService: storyRtdbService,
+          onStoryComplete: () => _markStoryReady(pairId),
+        ),
+      );
+      _storyRoute = route;
+
+      unawaited(
+        Navigator.of(context).push(route).whenComplete(() {
+          if (!mounted) return;
+          setState(() {
+            if (_activeStoryRoutePairId == pairId) {
+              _activeStoryRoutePairId = null;
+            }
+            if (_storyRoute == route) {
+              _storyRoute = null;
+            }
+            _dismissedStoryPairIds.add(pairId);
+          });
+        }),
+      );
+    });
+  }
+
+  void _maybeOpenStoryPage() {
+    if (_storyPairIdFor(widget.player, widget.session?.round) == null) {
+      return;
+    }
+    _openStoryPage();
+  }
+
+  void _maybeCloseStoryPage() {
+    if (_storyRoute == null ||
+        _storyPairIdFor(widget.player, widget.session?.round) != null) {
+      return;
+    }
+
+    final route = _storyRoute!;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final navigator = Navigator.of(context);
+      if (!route.isActive) return;
+      navigator.removeRoute(route);
+      if (!mounted) return;
+      setState(() {
+        if (_storyRoute == route) {
+          _storyRoute = null;
+        }
+        _activeStoryRoutePairId = null;
+      });
+    });
+  }
+
   @override
   void didUpdateWidget(covariant GameView oldWidget) {
     super.didUpdateWidget(oldWidget);
     final round = widget.session?.round;
     final currentRound = widget.session?.round;
     final oldRound = oldWidget.session?.round;
+    final player = widget.player;
+    final oldPlayer = oldWidget.player;
     final isPairedThisRound = widget.player?.pairedWith != null &&
         widget.player?.pairedRound != null &&
         widget.player!.pairedRound == currentRound;
@@ -3198,6 +3719,11 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
                 oldWidget.player?.currentRoundPrompts ?? const <String>[]) ??
             const <PromptItem>[])
         .isNotEmpty;
+    final isPlayerTurn = player != null && _isPlayerTurn(player);
+    final wasPlayerTurn = oldPlayer != null && _isPlayerTurn(oldPlayer);
+    final isSharedStoryStage = player != null && _isSharedStoryStage(player);
+    final wasSharedStoryStage =
+        oldPlayer != null && _isSharedStoryStage(oldPlayer);
 
     if (round != _seenRound) {
       _seenRound = round;
@@ -3205,13 +3731,16 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
       _hasStartedPromptDrop = false;
       _interactionEnded = false;
       _restartNextCardCooldown();
-      if (isPairedThisRound && prompts.isNotEmpty) {
+      if (isPairedThisRound &&
+          prompts.isNotEmpty &&
+          (isPlayerTurn || isSharedStoryStage)) {
         _playCardDropAnimation();
       }
     }
 
-    final promptIndex = widget.player?.currentPromptIndex ?? 0;
-    if (promptIndex != _animatedPromptIndex) {
+    final promptIndex = player?.currentPromptIndex ?? 0;
+    if (promptIndex != _animatedPromptIndex &&
+        (isPlayerTurn || isSharedStoryStage)) {
       _animatedPromptIndex = promptIndex;
       _interactionEnded = false;
       _playCardDropAnimation();
@@ -3220,12 +3749,18 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
 
     if (isPairedThisRound &&
         prompts.isNotEmpty &&
-        (!wasPairedThisRound || !hadPrompts)) {
+        (!wasPairedThisRound ||
+            !hadPrompts ||
+            (!wasPlayerTurn && isPlayerTurn) ||
+            (!wasSharedStoryStage && isSharedStoryStage))) {
       _interactionEnded = false;
       _playCardDropAnimation();
+      _restartNextCardCooldown();
     }
 
     _scheduleRoundInstructionsIfNeeded();
+    _maybeCloseStoryPage();
+    _maybeOpenStoryPage();
   }
 
   @override
@@ -3293,8 +3828,8 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
     final isPairedThisRound = player?.pairedWith != null &&
         player?.pairedRound != null &&
         player!.pairedRound == sessionRound;
-    final prompts = widget.promptCatalog?.resolveIds(
-            player?.currentRoundPrompts ?? const <String>[]) ??
+    final prompts = widget.promptCatalog
+            ?.resolveIds(player?.currentRoundPrompts ?? const <String>[]) ??
         const <PromptItem>[];
     if (isPairedThisRound && prompts.isNotEmpty) {
       _playCardDropAnimation();
@@ -3302,6 +3837,48 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
 
     _restartNextCardCooldown();
     _scheduleRoundInstructionsIfNeeded();
+    _maybeCloseStoryPage();
+    _maybeOpenStoryPage();
+  }
+
+  bool _hasStoryModePrompt(PlayerRecord player) {
+    return player.currentRoundPrompts.isNotEmpty &&
+        player.currentRoundPrompts.last == storyModePromptId;
+  }
+
+  int _normalPromptCount(PlayerRecord player) {
+    return _hasStoryModePrompt(player)
+        ? max(0, player.currentRoundPrompts.length - 1)
+        : player.currentRoundPrompts.length;
+  }
+
+  bool _hasRemainingNormalPrompt(PlayerRecord player) {
+    return player.currentPromptIndex < _normalPromptCount(player);
+  }
+
+  bool _isSharedStoryStage(PlayerRecord player) {
+    return _hasStoryModePrompt(player) &&
+        player.activeTurnPlayerId == null &&
+        player.currentPromptIndex >= _normalPromptCount(player);
+  }
+
+  bool _isPlayerTurn(PlayerRecord player) {
+    return player.activeTurnPlayerId == player.id ||
+        (player.activeTurnPlayerId == null &&
+            !_isSharedStoryStage(player) &&
+            _hasRemainingNormalPrompt(player));
+  }
+
+  bool _isWaitingForPartnerTurn(PlayerRecord player) {
+    return player.activeTurnPlayerId != null &&
+        player.activeTurnPlayerId != player.id &&
+        !_isSharedStoryStage(player);
+  }
+
+  bool _isInteractionReadyToFinish(PlayerRecord player) {
+    return player.activeTurnPlayerId == null &&
+        !_isSharedStoryStage(player) &&
+        !_hasRemainingNormalPrompt(player);
   }
 
   String? _instructionKeyForCurrentRound() {
@@ -3387,22 +3964,22 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'Complete each card together, then wait for the next round to begin.',
+                              'Cards alternate between the two of you. Finish the active card before passing the turn.',
                               style: TextStyle(color: _ink, height: 1.35),
                             ),
                             SizedBox(height: 10),
                             Text(
-                              'Take turns reading each card out loud and answer before moving on.',
+                              'Only the active player sees their next card. Read it out loud and answer before moving on.',
                               style: TextStyle(color: _ink, height: 1.35),
                             ),
                             SizedBox(height: 10),
                             Text(
-                              'Tap Next prompt only when both of you are ready.',
+                              'When it is not your turn, you can ask the same question, but your next turn will be skipped.',
                               style: TextStyle(color: _ink, height: 1.35),
                             ),
                             SizedBox(height: 10),
                             Text(
-                              'If the prompts do not load right away, ask the other person to enter your code too.',
+                              'If the cards do not load right away, ask the other person to enter your code too.',
                               style: TextStyle(color: _ink, height: 1.35),
                             ),
                           ],
@@ -3445,10 +4022,10 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
   void _restartNextCardCooldown() {
     _nextCardTimer?.cancel();
     final player = widget.player;
-    final prompts = widget.promptCatalog
-            ?.resolveIds(player?.currentRoundPrompts ?? const <String>[]) ??
-        const <PromptItem>[];
-    final hasPromptAction = player != null && prompts.isNotEmpty;
+    final hasPromptAction = player != null &&
+        (_isPlayerTurn(player) ||
+            _isSharedStoryStage(player) ||
+            _isInteractionReadyToFinish(player));
 
     if (!hasPromptAction) {
       if (_nextCardCooldown != 0 && mounted) {
@@ -3490,12 +4067,14 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
         player.pairedWith == null ||
         currentRound == null ||
         prompts.isEmpty ||
+        !_isPlayerTurn(player) ||
+        !_hasRemainingNormalPrompt(player) ||
         _nextCardCooldown > 0) {
       return;
     }
 
     final nextIndex = player.currentPromptIndex + 1;
-    if (nextIndex >= prompts.length) return;
+    if (nextIndex > prompts.length) return;
 
     setState(() => _submitting = true);
     _restartNextCardCooldown();
@@ -3505,6 +4084,19 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
     );
     if (mounted) {
       setState(() => _submitting = false);
+    }
+  }
+
+  Future<void> _askSameQuestion() async {
+    if (_submitting) return;
+
+    setState(() => _submitting = true);
+    try {
+      await widget.onAskSameQuestion();
+    } finally {
+      if (mounted) {
+        setState(() => _submitting = false);
+      }
     }
   }
 
@@ -3645,6 +4237,7 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
   Widget build(BuildContext context) {
     final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
     final player = widget.player;
+    final backgroundBodyStyle = _backgroundBodyStyle(context);
     final currentRound = widget.session?.round;
     final isPairedThisRound = !widget.forceMatchingMode &&
         player?.pairedWith != null &&
@@ -3653,11 +4246,20 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
     final prompts = widget.promptCatalog
             ?.resolveIds(player?.currentRoundPrompts ?? const <String>[]) ??
         const <PromptItem>[];
+    final isPlayerTurn =
+        isPairedThisRound && player != null && _isPlayerTurn(player);
+    final isWaitingForPartnerTurn =
+        isPairedThisRound && player != null && _isWaitingForPartnerTurn(player);
+    final isSharedStoryStage =
+        isPairedThisRound && player != null && _isSharedStoryStage(player);
+    final isInteractionReadyToFinish = isPairedThisRound &&
+        player != null &&
+        _isInteractionReadyToFinish(player);
     final promptIndex = prompts.isEmpty
         ? 0
-        : (player?.currentPromptIndex ?? 0).clamp(0, prompts.length - 1);
-    final hasMorePrompts =
-        prompts.isNotEmpty && promptIndex < prompts.length - 1;
+        : isSharedStoryStage
+            ? prompts.length - 1
+            : (player?.currentPromptIndex ?? 0).clamp(0, prompts.length - 1);
     final interactionRound =
         player?.interactionRound ?? _initialInteractionRound;
     final isFinalInteractionRound = interactionRound >= _finalInteractionRound;
@@ -3668,7 +4270,44 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
         : isFinalInteractionRound
             ? 'Finish interaction'
             : 'End interaction';
-    final activePromptCard = prompts.isEmpty
+    final storyCompletedFooter = !_interactionEnded
+        ? Column(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              _BlurMixButton(
+                onPressed: (_submitting ||
+                        _nextCardCooldown > 0 ||
+                        waitingForPartnerDecision)
+                    ? null
+                    : _handleEndInteraction,
+                seed: 'end-interaction',
+                width: 220,
+                height: 52,
+                fillColor: _nextCardCooldown > 0
+                    ? const Color(0xFFD6D0C5)
+                    : _primaryButton,
+                borderColor: _nextCardCooldown > 0
+                    ? const Color(0xFFC2B7A7)
+                    : _primaryButton,
+                textColor:
+                    _nextCardCooldown > 0 ? const Color(0xFF6F655B) : _offWhite,
+                textSize: 18,
+                textWeight: FontWeight.w800,
+                leadingIcon: _nextCardCooldown > 0 ? Icons.lock_outline : null,
+                disabledOpacity: _nextCardCooldown > 0 ? 1 : 0.55,
+                label: _submitting
+                    ? 'Loading...'
+                    : waitingForPartnerDecision
+                        ? 'Waiting for them...'
+                        : _nextCardCooldown > 0
+                            ? 'Locked ${_nextCardCooldown}s'
+                            : endInteractionLabel,
+              ),
+            ],
+          )
+        : null;
+    final activePromptCard = prompts.isEmpty ||
+            (!isPlayerTurn && !isSharedStoryStage)
         ? null
         : _PaperCard(
             width: _gamePromptCardWidth,
@@ -3677,16 +4316,15 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
             seed: '${prompts[promptIndex].id}-$promptIndex-${player?.id ?? ''}',
           );
     final showPromptCards = _hasStartedPromptDrop && activePromptCard != null;
-    final isStoryModeCard =
-        prompts.isNotEmpty && prompts[promptIndex].id == storyModePromptId;
-    final storyRtdbService = widget.storyRtdbService ?? RtdbService();
-    final storyPromptCatalogService = widget.storyPromptCatalogService ??
-        DatabaseStoryPromptCatalogService(rtdbService: storyRtdbService);
-    final storyCardDealer = widget.storyCardDealer ?? StoryPromptCardDealer();
-    final showEmbeddedStoryPanel = isStoryModeCard &&
+    final showEmbeddedStoryPanel = isSharedStoryStage &&
         widget.sessionId != null &&
         player != null &&
         player.pairedWith != null;
+    final storyPairId = _storyPairIdFor(player, currentRound);
+    final hasReadyStory =
+        storyPairId != null && _readyStoryPairIds.contains(storyPairId);
+    final isOpeningStoryPage =
+        storyPairId != null && _activeStoryRoutePairId == storyPairId;
     _PaperCard? buildStackCard(String seedSuffix) {
       if (prompts.isEmpty) return null;
       return _PaperCard(
@@ -3698,287 +4336,353 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
       );
     }
 
-    return SingleChildScrollView(
-      padding: EdgeInsets.only(bottom: keyboardInset + 24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Text(
-            isPairedThisRound ? 'YouMe' : 'Find Your Match',
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  color: _ink,
-                ),
-          ),
-          const SizedBox(height: 12),
-          if (!isPairedThisRound)
+    return DefaultTextStyle.merge(
+      style: backgroundBodyStyle,
+      child: SingleChildScrollView(
+        padding: EdgeInsets.only(bottom: keyboardInset + 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
             Text(
-              widget.unpairedInstructions,
+              isPairedThisRound ? 'YouMe' : 'Find Your Match',
               textAlign: TextAlign.center,
-              style: const TextStyle(color: _ink),
+              style: _backgroundHeadlineStyle(context),
             ),
-          const SizedBox(height: 20),
-          if (isPairedThisRound) ...[
-            if (prompts.isNotEmpty) ...[
-              if (showEmbeddedStoryPanel) ...[
-                StoryPairPromptPanel(
-                  key: ValueKey(
-                    'story-${widget.sessionId}-${player!.id}-${player!.pairedWith}-${player!.pairedRound ?? currentRound ?? 1}',
+            const SizedBox(height: 12),
+            if (!isPairedThisRound)
+              Text(
+                widget.unpairedInstructions,
+                textAlign: TextAlign.center,
+                style: backgroundBodyStyle,
+              ),
+            const SizedBox(height: 20),
+            if (isPairedThisRound) ...[
+              if (prompts.isNotEmpty) ...[
+                if (showEmbeddedStoryPanel) ...[
+                  Center(
+                    child: _PaperCard(
+                      width: _gamePromptCardWidth,
+                      height: _gamePromptCardHeight,
+                      prompt: hasReadyStory
+                          ? 'Your story is ready.\n\nRead it again or end the interaction when you are ready.'
+                          : isOpeningStoryPage
+                              ? 'Opening your story page now.\n\nStay here if the transition takes a moment.'
+                              : 'Your story opens on its own page.\n\nIf it does not appear, open it below.',
+                      seed:
+                          'story-stage-${player.id}-${player.pairedWith}-${player.pairedRound ?? currentRound ?? 1}',
+                    ),
                   ),
-                  sessionId: widget.sessionId!,
-                  player: player!,
-                  partnerId: player!.pairedWith!,
-                  sessionRound: player!.pairedRound ?? currentRound ?? 1,
-                  promptCatalogService: storyPromptCatalogService,
-                  cardDealer: storyCardDealer,
-                  rtdbService: storyRtdbService,
-                  promptCardSubtitle: 'Story mode',
-                ),
-                const SizedBox(height: 16),
-                if (!_interactionEnded) ...[
+                  const SizedBox(height: 10),
+                  if (!hasReadyStory)
+                    _BlurMixButton(
+                      onPressed: isOpeningStoryPage
+                          ? null
+                          : () => _openStoryPage(force: true),
+                      seed: 'open-story-page',
+                      width: 220,
+                      height: 52,
+                      fillColor: _primaryButton,
+                      borderColor: _primaryButton,
+                      textColor: _offWhite,
+                      textSize: 18,
+                      textWeight: FontWeight.w800,
+                      disabledOpacity: 0.55,
+                      label: isOpeningStoryPage
+                          ? 'Opening story...'
+                          : 'Open story page',
+                    ),
+                  if (hasReadyStory && storyCompletedFooter != null) ...[
+                    storyCompletedFooter,
+                    const SizedBox(height: 10),
+                    TextButton(
+                      onPressed: isOpeningStoryPage
+                          ? null
+                          : () => _openStoryPage(force: true),
+                      child: Text(
+                        isOpeningStoryPage
+                            ? 'Opening story...'
+                            : 'Open story page again',
+                      ),
+                    ),
+                  ],
+                  if (waitingForPartnerDecision) ...[
+                    const SizedBox(height: 10),
+                    Text(
+                      'You picked keep going. Round 2 starts only if they do too.',
+                      textAlign: TextAlign.center,
+                      style: backgroundBodyStyle,
+                    ),
+                  ],
+                ] else if (isPlayerTurn) ...[
+                  Center(
+                    child: SizedBox(
+                      width: _gamePromptCanvasWidth,
+                      height: _gamePromptCanvasHeight,
+                      child: Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          if (showPromptCards)
+                            Center(
+                              child: Transform(
+                                alignment: Alignment.center,
+                                transform: Matrix4.identity()
+                                  ..translateByDouble(-14, 8, 0, 1)
+                                  ..rotateZ(-0.11),
+                                child: Opacity(
+                                  opacity: 0.9,
+                                  child: buildStackCard('back-left'),
+                                ),
+                              ),
+                            ),
+                          if (showPromptCards)
+                            Center(
+                              child: Transform(
+                                alignment: Alignment.center,
+                                transform: Matrix4.identity()
+                                  ..translateByDouble(10, 12, 0, 1)
+                                  ..rotateZ(0.09),
+                                child: Opacity(
+                                  opacity: 0.86,
+                                  child: buildStackCard('back-right'),
+                                ),
+                              ),
+                            ),
+                          if (showPromptCards)
+                            AnimatedBuilder(
+                              animation: _dropController,
+                              child: activePromptCard,
+                              builder: (context, child) {
+                                return Center(
+                                  child: Transform(
+                                    alignment: Alignment.center,
+                                    transform: Matrix4.identity()
+                                      ..setEntry(3, 2, 0.001)
+                                      ..translateByDouble(
+                                        _dropXOffset.value,
+                                        _dropYOffset.value,
+                                        0,
+                                        1,
+                                      )
+                                      ..rotateZ(_dropRotation.value)
+                                      ..scaleByDouble(
+                                        _dropScale.value,
+                                        _dropScale.value,
+                                        1,
+                                        1,
+                                      ),
+                                    child: child,
+                                  ),
+                                );
+                              },
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  if (!_interactionEnded)
+                    _BlurMixButton(
+                      onPressed: (_submitting || _nextCardCooldown > 0)
+                          ? null
+                          : _drawNextPrompt,
+                      seed: 'draw-next-card',
+                      width: 220,
+                      height: 52,
+                      fillColor: _nextCardCooldown > 0
+                          ? const Color(0xFFD6D0C5)
+                          : _primaryButton,
+                      borderColor: _nextCardCooldown > 0
+                          ? const Color(0xFFC2B7A7)
+                          : _primaryButton,
+                      textColor: _nextCardCooldown > 0
+                          ? const Color(0xFF6F655B)
+                          : _offWhite,
+                      textSize: 18,
+                      textWeight: FontWeight.w800,
+                      leadingIcon:
+                          _nextCardCooldown > 0 ? Icons.lock_outline : null,
+                      disabledOpacity: _nextCardCooldown > 0 ? 1 : 0.55,
+                      label: _submitting
+                          ? 'Passing turn...'
+                          : _nextCardCooldown > 0
+                              ? 'Locked ${_nextCardCooldown}s'
+                              : 'Pass turn',
+                    ),
+                ] else if (isWaitingForPartnerTurn) ...[
+                  Center(
+                    child: _PaperCard(
+                      width: _gamePromptCardWidth,
+                      height: _gamePromptCardHeight,
+                      prompt: player.skipNextTurn
+                          ? 'It is their turn.\n\nAsk the same question if you want to stay on it.\n\nYour next turn will be skipped.'
+                          : 'It is their turn.\n\nYou can ask the same question, but your next turn will be skipped.',
+                      seed: 'waiting-${player.id}-${player.currentPromptIndex}',
+                    ),
+                  ),
+                  const SizedBox(height: 10),
                   _BlurMixButton(
-                    onPressed: (_submitting ||
-                            _nextCardCooldown > 0 ||
-                            waitingForPartnerDecision)
+                    onPressed: (_submitting || player.skipNextTurn)
                         ? null
-                        : _handleEndInteraction,
-                    seed: 'end-interaction',
-                    width: 220,
+                        : _askSameQuestion,
+                    seed: 'ask-same-question',
+                    width: 260,
                     height: 52,
-                    fillColor: _nextCardCooldown > 0
+                    fillColor: player.skipNextTurn
                         ? const Color(0xFFD6D0C5)
                         : _primaryButton,
-                    borderColor: _nextCardCooldown > 0
+                    borderColor: player.skipNextTurn
                         ? const Color(0xFFC2B7A7)
                         : _primaryButton,
-                    textColor: _nextCardCooldown > 0
+                    textColor: player.skipNextTurn
                         ? const Color(0xFF6F655B)
                         : _offWhite,
                     textSize: 18,
                     textWeight: FontWeight.w800,
-                    leadingIcon:
-                        _nextCardCooldown > 0 ? Icons.lock_outline : null,
-                    disabledOpacity: _nextCardCooldown > 0 ? 1 : 0.55,
+                    disabledOpacity: player.skipNextTurn ? 1 : 0.55,
                     label: _submitting
-                        ? 'Loading...'
-                        : waitingForPartnerDecision
-                            ? 'Waiting for them...'
-                            : _nextCardCooldown > 0
-                                ? 'Locked ${_nextCardCooldown}s'
-                                : endInteractionLabel,
+                        ? 'Saving...'
+                        : player.skipNextTurn
+                            ? 'Next turn skipped'
+                            : 'Ask same question',
                   ),
-                  if (waitingForPartnerDecision) ...[
-                    const SizedBox(height: 10),
-                    const Text(
-                      'You picked keep going. Round 2 starts only if they do too.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: _ink, height: 1.35),
+                  const SizedBox(height: 10),
+                  Text(
+                    player.skipNextTurn
+                        ? 'You chose to mirror this question. Your next card will be skipped.'
+                        : 'If you want to stay on the same topic, ask the same question and give up your next turn.',
+                    textAlign: TextAlign.center,
+                    style: backgroundBodyStyle,
+                  ),
+                ] else if (isInteractionReadyToFinish) ...[
+                  Center(
+                    child: _PaperCard(
+                      width: _gamePromptCardWidth,
+                      height: _gamePromptCardHeight,
+                      prompt:
+                          'All cards are done.\n\nWrap up the conversation when you are ready.',
+                      seed: 'finish-${player!.id}-${player.currentPromptIndex}',
                     ),
+                  ),
+                  const SizedBox(height: 10),
+                  if (!_interactionEnded) ...[
+                    _BlurMixButton(
+                      onPressed: (_submitting ||
+                              _nextCardCooldown > 0 ||
+                              waitingForPartnerDecision)
+                          ? null
+                          : _handleEndInteraction,
+                      seed: 'end-interaction',
+                      width: 220,
+                      height: 52,
+                      fillColor: _nextCardCooldown > 0
+                          ? const Color(0xFFD6D0C5)
+                          : _primaryButton,
+                      borderColor: _nextCardCooldown > 0
+                          ? const Color(0xFFC2B7A7)
+                          : _primaryButton,
+                      textColor: _nextCardCooldown > 0
+                          ? const Color(0xFF6F655B)
+                          : _offWhite,
+                      textSize: 18,
+                      textWeight: FontWeight.w800,
+                      leadingIcon:
+                          _nextCardCooldown > 0 ? Icons.lock_outline : null,
+                      disabledOpacity: _nextCardCooldown > 0 ? 1 : 0.55,
+                      label: _submitting
+                          ? 'Loading...'
+                          : waitingForPartnerDecision
+                              ? 'Waiting for them...'
+                              : _nextCardCooldown > 0
+                                  ? 'Locked ${_nextCardCooldown}s'
+                                  : endInteractionLabel,
+                    ),
+                    if (waitingForPartnerDecision) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        'You picked keep going. Round 2 starts only if they do too.',
+                        textAlign: TextAlign.center,
+                        style: backgroundBodyStyle,
+                      ),
+                    ],
                   ],
-                ],
-              ] else ...[
-                Center(
-                  child: SizedBox(
-                    width: _gamePromptCanvasWidth,
-                    height: _gamePromptCanvasHeight,
-                    child: Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        if (showPromptCards)
-                          Center(
-                            child: Transform(
-                              alignment: Alignment.center,
-                              transform: Matrix4.identity()
-                                ..translateByDouble(-14, 8, 0, 1)
-                                ..rotateZ(-0.11),
-                              child: Opacity(
-                                opacity: 0.9,
-                                child: buildStackCard('back-left'),
-                              ),
-                            ),
-                          ),
-                        if (showPromptCards)
-                          Center(
-                            child: Transform(
-                              alignment: Alignment.center,
-                              transform: Matrix4.identity()
-                                ..translateByDouble(10, 12, 0, 1)
-                                ..rotateZ(0.09),
-                              child: Opacity(
-                                opacity: 0.86,
-                                child: buildStackCard('back-right'),
-                              ),
-                            ),
-                          ),
-                        if (showPromptCards)
-                          AnimatedBuilder(
-                            animation: _dropController,
-                            child: activePromptCard,
-                            builder: (context, child) {
-                              return Center(
-                                child: Transform(
-                                  alignment: Alignment.center,
-                                  transform: Matrix4.identity()
-                                    ..setEntry(3, 2, 0.001)
-                                    ..translateByDouble(
-                                      _dropXOffset.value,
-                                      _dropYOffset.value,
-                                      0,
-                                      1,
-                                    )
-                                    ..rotateZ(_dropRotation.value)
-                                    ..scaleByDouble(
-                                      _dropScale.value,
-                                      _dropScale.value,
-                                      1,
-                                      1,
-                                    ),
-                                  child: child,
-                                ),
-                              );
-                            },
-                          ),
-                      ],
+                ] else ...[
+                  Padding(
+                    padding: const EdgeInsets.only(top: 10),
+                    child: Text(
+                      'Waiting for the next card...',
+                      textAlign: TextAlign.center,
+                      style: backgroundBodyStyle,
                     ),
+                  ),
+                ],
+              ] else
+                Padding(
+                  padding: EdgeInsets.only(top: 10),
+                  child: Text(
+                    'Your prompts are still loading. Ask the other person to enter your code too.',
+                    textAlign: TextAlign.center,
+                    style: backgroundBodyStyle,
+                  ),
+                ),
+            ] else ...[
+              if (widget.showInviteCodeCard &&
+                  player != null &&
+                  player.inviteCode.isNotEmpty) ...[
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: _primaryButton,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: _primaryButton),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Color(0x22000000),
+                        blurRadius: 14,
+                        offset: Offset(0, 8),
+                      ),
+                    ],
+                  ),
+                  child: Text(
+                    player.inviteCode.toUpperCase(),
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                          color: Colors.white,
+                          letterSpacing: 6,
+                          fontWeight: FontWeight.w800,
+                        ),
                   ),
                 ),
                 const SizedBox(height: 10),
-                if (!_interactionEnded && hasMorePrompts)
-                  _BlurMixButton(
-                    onPressed: (_submitting || _nextCardCooldown > 0)
-                        ? null
-                        : _drawNextPrompt,
-                    seed: 'draw-next-card',
-                    width: 220,
-                    height: 52,
-                    fillColor: _nextCardCooldown > 0
-                        ? const Color(0xFFD6D0C5)
-                        : _primaryButton,
-                    borderColor: _nextCardCooldown > 0
-                        ? const Color(0xFFC2B7A7)
-                        : _primaryButton,
-                    textColor: _nextCardCooldown > 0
-                        ? const Color(0xFF6F655B)
-                        : _offWhite,
-                    textSize: 18,
-                    textWeight: FontWeight.w800,
-                    leadingIcon:
-                        _nextCardCooldown > 0 ? Icons.lock_outline : null,
-                    disabledOpacity: _nextCardCooldown > 0 ? 1 : 0.55,
-                    label: _submitting
-                        ? 'Loading next prompt...'
-                        : _nextCardCooldown > 0
-                            ? 'Locked ${_nextCardCooldown}s'
-                            : 'Next prompt',
-                  )
-                else if (!_interactionEnded) ...[
-                  _BlurMixButton(
-                    onPressed: (_submitting ||
-                            _nextCardCooldown > 0 ||
-                            waitingForPartnerDecision)
-                        ? null
-                        : _handleEndInteraction,
-                    seed: 'end-interaction',
-                    width: 220,
-                    height: 52,
-                    fillColor: _nextCardCooldown > 0
-                        ? const Color(0xFFD6D0C5)
-                        : _primaryButton,
-                    borderColor: _nextCardCooldown > 0
-                        ? const Color(0xFFC2B7A7)
-                        : _primaryButton,
-                    textColor: _nextCardCooldown > 0
-                        ? const Color(0xFF6F655B)
-                        : _offWhite,
-                    textSize: 18,
-                    textWeight: FontWeight.w800,
-                    leadingIcon:
-                        _nextCardCooldown > 0 ? Icons.lock_outline : null,
-                    disabledOpacity: _nextCardCooldown > 0 ? 1 : 0.55,
-                    label: _submitting
-                        ? 'Loading...'
-                        : waitingForPartnerDecision
-                            ? 'Waiting for them...'
-                            : _nextCardCooldown > 0
-                                ? 'Locked ${_nextCardCooldown}s'
-                                : endInteractionLabel,
-                  ),
-                  if (waitingForPartnerDecision) ...[
-                    const SizedBox(height: 10),
-                    const Text(
-                      'You picked keep going. Round 2 starts only if they do too.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: _ink, height: 1.35),
-                    ),
-                  ],
-                ],
               ],
-            ] else
-              const Padding(
-                padding: EdgeInsets.only(top: 10),
-                child: Text(
-                  'Your prompts are still loading. Ask the other person to enter your code too.',
-                  textAlign: TextAlign.center,
+              Text(
+                widget.codeEntryPrompt,
+                style: backgroundBodyStyle,
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _codeCtrl,
+                maxLength: 4,
+                style: const TextStyle(color: _ink),
+                textCapitalization: TextCapitalization.characters,
+                decoration: const InputDecoration(
+                  border: OutlineInputBorder(),
+                  hintText: 'AB12',
                 ),
               ),
-          ] else ...[
-            if (widget.showInviteCodeCard &&
-                player != null &&
-                player.inviteCode.isNotEmpty) ...[
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                decoration: BoxDecoration(
-                  color: _primaryButton,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: _primaryButton),
-                  boxShadow: const [
-                    BoxShadow(
-                      color: Color(0x22000000),
-                      blurRadius: 14,
-                      offset: Offset(0, 8),
-                    ),
-                  ],
-                ),
-                child: Text(
-                  player.inviteCode.toUpperCase(),
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                        color: Colors.white,
-                        letterSpacing: 6,
-                        fontWeight: FontWeight.w800,
-                      ),
-                ),
-              ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 8),
+              _BlurMixButton(
+                onPressed: _submitting ? null : _submitCode,
+                seed: 'pair-for-round',
+                width: double.infinity,
+                label: _submitting ? 'Joining...' : 'Start',
+              )
             ],
-            Text(
-              widget.codeEntryPrompt,
-              style: const TextStyle(color: _ink),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _codeCtrl,
-              maxLength: 4,
-              style: const TextStyle(color: _ink),
-              textCapitalization: TextCapitalization.characters,
-              decoration: const InputDecoration(
-                border: OutlineInputBorder(),
-                hintText: 'AB12',
-              ),
-            ),
-            const SizedBox(height: 8),
-            _BlurMixButton(
-              onPressed: _submitting ? null : _submitCode,
-              seed: 'pair-for-round',
-              width: double.infinity,
-              label: _submitting ? 'Joining...' : 'Start',
-            )
+            if (widget.error != null) ...[
+              const SizedBox(height: 12),
+              Text(widget.error!, style: const TextStyle(color: Colors.red)),
+            ]
           ],
-          if (widget.error != null) ...[
-            const SizedBox(height: 12),
-            Text(widget.error!, style: const TextStyle(color: Colors.red)),
-          ]
-        ],
+        ),
       ),
     );
   }
@@ -4562,13 +5266,10 @@ class _FitPromptText extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final baseStyle = Theme.of(context).textTheme.titleLarge?.copyWith(
-      color: Colors.white,
-      fontWeight: FontWeight.w700,
+    final baseStyle = _textOnBackgroundStyle(
+      Theme.of(context).textTheme.titleLarge ?? const TextStyle(fontSize: 24),
+      fontWeight: FontWeight.w800,
       height: 1.12,
-      shadows: const [
-        Shadow(color: Color(0xCC000000), blurRadius: 16),
-      ],
     );
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -4579,14 +5280,14 @@ class _FitPromptText extends StatelessWidget {
           minFont: 12,
           textBuilder: (fontSize) => TextSpan(
             text: prompt,
-            style: baseStyle?.copyWith(fontSize: fontSize),
+            style: baseStyle.copyWith(fontSize: fontSize),
           ),
         );
         return Text(
           prompt,
           textAlign: TextAlign.center,
           softWrap: true,
-          style: baseStyle?.copyWith(fontSize: selectedSize),
+          style: baseStyle.copyWith(fontSize: selectedSize),
         );
       },
     );
@@ -4604,21 +5305,15 @@ class _FitQuoteText extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final quoteStyle = Theme.of(context).textTheme.titleLarge?.copyWith(
-      color: Colors.white,
-      fontWeight: FontWeight.w700,
+    final quoteStyle = _textOnBackgroundStyle(
+      Theme.of(context).textTheme.titleLarge ?? const TextStyle(fontSize: 24),
+      fontWeight: FontWeight.w800,
       height: 1.12,
-      shadows: const [
-        Shadow(color: Color(0xCC000000), blurRadius: 16),
-      ],
     );
-    final authorStyle = Theme.of(context).textTheme.bodySmall?.copyWith(
-      color: Colors.white,
-      fontWeight: FontWeight.w600,
+    final authorStyle = _textOnBackgroundStyle(
+      Theme.of(context).textTheme.bodySmall ?? const TextStyle(fontSize: 12),
+      fontWeight: FontWeight.w700,
       height: 1.25,
-      shadows: const [
-        Shadow(color: Color(0xB3000000), blurRadius: 12),
-      ],
     );
 
     return LayoutBuilder(
@@ -4649,8 +5344,8 @@ class _FitQuoteText extends StatelessWidget {
   }
 
   TextSpan _buildSpan({
-    required TextStyle? quoteStyle,
-    required TextStyle? authorStyle,
+    required TextStyle quoteStyle,
+    required TextStyle authorStyle,
     required double quoteFontSize,
   }) {
     final authorFontSize = max(10.0, quoteFontSize * 0.48);
@@ -4658,12 +5353,12 @@ class _FitQuoteText extends StatelessWidget {
       children: [
         TextSpan(
           text: quote,
-          style: quoteStyle?.copyWith(fontSize: quoteFontSize),
+          style: quoteStyle.copyWith(fontSize: quoteFontSize),
         ),
         if (author.isNotEmpty)
           TextSpan(
             text: '\n\n$author',
-            style: authorStyle?.copyWith(fontSize: authorFontSize),
+            style: authorStyle.copyWith(fontSize: authorFontSize),
           ),
       ],
     );

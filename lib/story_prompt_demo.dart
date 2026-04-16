@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math';
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
 
@@ -13,6 +14,12 @@ const _demoInk = Color(0xFF1D1A16);
 const _demoMutedInk = Color(0xFF685E54);
 const _demoAccent = Color(0xFFB85432);
 const _demoAccentSoft = Color(0xFFF6E0D4);
+const _storyTextureAssets = <String>[
+  'assets/Polaroid1.png',
+  'assets/Polaroid2.png',
+  'assets/Polaroid3.png',
+  'assets/Polaroid4.png',
+];
 const _storyPromptPath = 'mini/prompts';
 const _storyMetadataKeys = <String>{
   'prompt',
@@ -429,22 +436,34 @@ int _stableSeedFromString(String value) {
   return hash & 0x7fffffff;
 }
 
-Alignment _storyGlowAlignmentForSeed(String seed) {
-  final random = Random(_stableSeedFromString('$seed-align'));
-  return Alignment(
-    -1 + (random.nextDouble() * 2),
-    -1 + (random.nextDouble() * 2),
-  );
-}
-
-Color _storyToneColorForSeed(String seed) {
-  final random = Random(_stableSeedFromString('$seed-tone'));
-  return HSLColor.fromAHSL(1, random.nextDouble() * 360, 0.38, 0.48).toColor();
-}
-
 double _storyCardRotationForSeed(String seed) {
   final random = Random(_stableSeedFromString('$seed-rotation'));
   return (random.nextDouble() - 0.5) * 0.08;
+}
+
+String _storyTextureAssetForSeed(String seed) {
+  final random = Random(_stableSeedFromString('$seed-texture-asset'));
+  return _storyTextureAssets[random.nextInt(_storyTextureAssets.length)];
+}
+
+int? _storyTargetTextureDecodeWidth({
+  required BoxConstraints constraints,
+  required double devicePixelRatio,
+  required double scale,
+}) {
+  final boundedWidth = constraints.hasBoundedWidth && constraints.maxWidth > 0;
+  final boundedHeight =
+      constraints.hasBoundedHeight && constraints.maxHeight > 0;
+  if (!boundedWidth && !boundedHeight) return null;
+
+  final logicalMaxDimension = max(
+    boundedWidth ? constraints.maxWidth : 0,
+    boundedHeight ? constraints.maxHeight : 0,
+  );
+  final sampledDimension = logicalMaxDimension / max(scale, 1);
+  final paddedPhysicalDimension =
+      (sampledDimension * devicePixelRatio * 1.35).ceil();
+  return paddedPhysicalDimension.clamp(192, 768).toInt();
 }
 
 int _comparePromptNodeKeys(Object? left, Object? right) {
@@ -1056,6 +1075,7 @@ class StoryPairSessionPage extends StatelessWidget {
     StoryPromptCatalogService? promptCatalogService,
     StoryPromptCardDealer? cardDealer,
     RtdbService? rtdbService,
+    this.onStoryComplete,
   })  : promptCatalogService =
             promptCatalogService ?? DatabaseStoryPromptCatalogService(),
         cardDealer = cardDealer ?? StoryPromptCardDealer(),
@@ -1068,6 +1088,7 @@ class StoryPairSessionPage extends StatelessWidget {
   final StoryPromptCatalogService promptCatalogService;
   final StoryPromptCardDealer cardDealer;
   final RtdbService rtdbService;
+  final VoidCallback? onStoryComplete;
 
   @override
   Widget build(BuildContext context) {
@@ -1108,6 +1129,8 @@ class StoryPairSessionPage extends StatelessWidget {
                   showMetadataPanel: true,
                   showPairId: true,
                   showNameField: true,
+                  promptCardSubtitle: 'Story mode',
+                  onStoryComplete: onStoryComplete,
                 ),
               ),
             ),
@@ -1132,6 +1155,8 @@ class StoryPairPromptPanel extends StatefulWidget {
     this.showPairId = false,
     this.showNameField = false,
     this.promptCardSubtitle = 'Your category cards',
+    this.completedFooter,
+    this.onStoryComplete,
   })  : promptCatalogService =
             promptCatalogService ?? DatabaseStoryPromptCatalogService(),
         cardDealer = cardDealer ?? StoryPromptCardDealer(),
@@ -1148,6 +1173,8 @@ class StoryPairPromptPanel extends StatefulWidget {
   final bool showPairId;
   final bool showNameField;
   final String promptCardSubtitle;
+  final Widget? completedFooter;
+  final VoidCallback? onStoryComplete;
 
   @override
   State<StoryPairPromptPanel> createState() => _StoryPairPromptPanelState();
@@ -1160,6 +1187,7 @@ class _StoryPairPromptPanelState extends State<StoryPairPromptPanel> {
   bool _loading = true;
   bool _submitting = false;
   bool _hasSubmittedSelections = false;
+  bool _hasNotifiedStoryComplete = false;
   String? _error;
   Timer? _poller;
 
@@ -1246,6 +1274,7 @@ class _StoryPairPromptPanelState extends State<StoryPairPromptPanel> {
         _result = existingResult;
         _hasSubmittedSelections = existingPlayer?.isComplete ?? false;
       });
+      _notifyStoryCompleteIfNeeded(existingResult);
 
       if (_hasSubmittedSelections && !_hasTerminalResult(existingResult)) {
         _startPolling();
@@ -1264,7 +1293,15 @@ class _StoryPairPromptPanelState extends State<StoryPairPromptPanel> {
   }
 
   bool _hasTerminalResult(StoryPairResultRecord? result) {
-    return result?.isComplete == true || result?.isError == true;
+    return result?.hasText == true || result?.isError == true;
+  }
+
+  void _notifyStoryCompleteIfNeeded(StoryPairResultRecord? result) {
+    if (_hasNotifiedStoryComplete || result?.hasText != true) {
+      return;
+    }
+    _hasNotifiedStoryComplete = true;
+    widget.onStoryComplete?.call();
   }
 
   Future<void> _savePlayerCard(
@@ -1356,6 +1393,7 @@ class _StoryPairPromptPanelState extends State<StoryPairPromptPanel> {
         setState(() {
           _result = result;
         });
+        _notifyStoryCompleteIfNeeded(result);
         if (_hasTerminalResult(result)) {
           _poller?.cancel();
           return;
@@ -1376,6 +1414,10 @@ class _StoryPairPromptPanelState extends State<StoryPairPromptPanel> {
     final result = _result;
     final showHeaderPanel =
         widget.showMetadataPanel || widget.showPairId || widget.showNameField;
+    final hasDisplayableStory = result?.hasText == true;
+    final shouldShowPromptCard = !_hasSubmittedSelections && card != null;
+    final shouldShowWaitingState =
+        _hasSubmittedSelections && !_hasTerminalResult(result);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1427,7 +1469,7 @@ class _StoryPairPromptPanelState extends State<StoryPairPromptPanel> {
               child: CircularProgressIndicator(),
             ),
           )
-        else if (card != null)
+        else if (shouldShowPromptCard)
           StoryPlayerPromptCard(
             title: _playerName,
             subtitle: widget.promptCardSubtitle,
@@ -1438,7 +1480,7 @@ class _StoryPairPromptPanelState extends State<StoryPairPromptPanel> {
               option: option,
             ),
           ),
-        if (card != null) ...[
+        if (shouldShowPromptCard) ...[
           const SizedBox(height: 16),
           Align(
             alignment: Alignment.centerLeft,
@@ -1457,17 +1499,40 @@ class _StoryPairPromptPanelState extends State<StoryPairPromptPanel> {
             ),
           ),
         ],
-        if (_hasSubmittedSelections && !_hasTerminalResult(result)) ...[
+        if (shouldShowWaitingState) ...[
           const SizedBox(height: 14),
           _DemoPanel(
-            child: Text(
-              result?.isProcessing == true
-                  ? 'Your story is being generated now.'
-                  : 'Your answers are saved. Waiting for the other player and for story to appear on the pair record.',
-              style: theme.textTheme.bodyLarge?.copyWith(
-                color: _demoInk,
-                height: 1.4,
-              ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                const SizedBox(
+                  width: 32,
+                  height: 32,
+                  child: CircularProgressIndicator(strokeWidth: 3),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Writing your story',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    color: _demoInk,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  result?.isProcessing == true
+                      ? 'Your story is being generated now.'
+                      : result?.isComplete == true
+                          ? 'Your story is almost ready. Waiting for the story value to appear on the pair record.'
+                          : 'Your answers are saved. Waiting for the other player and for story to appear on the pair record.',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodyLarge?.copyWith(
+                    color: _demoInk,
+                    height: 1.4,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -1479,8 +1544,7 @@ class _StoryPairPromptPanelState extends State<StoryPairPromptPanel> {
           const SizedBox(height: 16),
           _InlineError(message: result!.error!),
         ],
-        if (result?.isComplete == true &&
-            (result?.text ?? '').trim().isNotEmpty) ...[
+        if (hasDisplayableStory) ...[
           const SizedBox(height: 20),
           _DemoPanel(
             child: Column(
@@ -1504,6 +1568,10 @@ class _StoryPairPromptPanelState extends State<StoryPairPromptPanel> {
               ],
             ),
           ),
+          if (widget.completedFooter != null) ...[
+            const SizedBox(height: 16),
+            widget.completedFooter!,
+          ],
         ],
       ],
     );
@@ -1761,19 +1829,11 @@ class _PromptChoiceSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final toneColor = _storyToneColorForSeed(seed);
-    final toneHsl = HSLColor.fromColor(toneColor);
-    final accentColor = toneHsl
-        .withSaturation(min(toneHsl.saturation + 0.16, 1.0))
-        .withLightness(min(toneHsl.lightness + 0.12, 1.0))
-        .toColor();
-    final glowAlignment = _storyGlowAlignmentForSeed(seed);
-    final sweepAlignment = _storyGlowAlignmentForSeed('$seed-sweep');
     return Transform.rotate(
       angle: _storyCardRotationForSeed(seed),
       child: DecoratedBox(
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: const Color(0xFFF5F5F3),
           borderRadius: BorderRadius.circular(14),
           boxShadow: const [
             BoxShadow(
@@ -1784,76 +1844,27 @@ class _PromptChoiceSection extends StatelessWidget {
           ],
         ),
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 12, 12, 14),
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               ClipRRect(
                 borderRadius: BorderRadius.circular(8),
                 child: AspectRatio(
-                  aspectRatio: 0.92,
+                  aspectRatio: 0.82,
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
-                      DecoratedBox(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: [
-                              Color.alphaBlend(
-                                toneColor.withValues(alpha: 0.72),
-                                const Color(0xFF16120F),
-                              ),
-                              Color.alphaBlend(
-                                accentColor.withValues(alpha: 0.30),
-                                const Color(0xFF342A21),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      DecoratedBox(
+                      _StoryTextureBackdrop(seed: seed),
+                      const DecoratedBox(
                         decoration: BoxDecoration(
                           gradient: RadialGradient(
-                            center: glowAlignment,
-                            radius: 1.0,
+                            center: Alignment.center,
+                            radius: 0.9,
                             colors: [
-                              accentColor.withValues(alpha: 0.34),
-                              Colors.transparent,
-                            ],
-                          ),
-                        ),
-                      ),
-                      DecoratedBox(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: sweepAlignment,
-                            end:
-                                Alignment(-sweepAlignment.x, -sweepAlignment.y),
-                            colors: [
-                              Colors.white.withValues(alpha: 0.16),
-                              Colors.transparent,
-                              Colors.black.withValues(alpha: 0.22),
-                            ],
-                            stops: const [0, 0.44, 1],
-                          ),
-                        ),
-                      ),
-                      DecoratedBox(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                            colors: [
-                              Color.alphaBlend(
-                                toneColor.withValues(alpha: 0.18),
-                                Colors.black.withValues(alpha: 0.26),
-                              ),
-                              Color.alphaBlend(
-                                toneColor.withValues(alpha: 0.46),
-                                Colors.black.withValues(alpha: 0.64),
-                              ),
+                              Color(0xD12A2A2A),
+                              Color(0xA61A1A1A),
+                              Color(0x4D0D0D0D),
                             ],
                           ),
                         ),
@@ -1874,7 +1885,7 @@ class _PromptChoiceSection extends StatelessWidget {
                             Container(
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 10,
-                                vertical: 6,
+                                vertical: 5,
                               ),
                               decoration: BoxDecoration(
                                 color: Colors.white.withValues(alpha: 0.18),
@@ -1891,15 +1902,15 @@ class _PromptChoiceSection extends StatelessWidget {
                                 ),
                               ),
                             ),
-                            const Spacer(),
+                            const SizedBox(height: 12),
                             Text(
                               choice.category,
-                              maxLines: 3,
+                              maxLines: 2,
                               overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.headlineSmall?.copyWith(
+                              style: theme.textTheme.titleLarge?.copyWith(
                                 color: Colors.white,
                                 fontWeight: FontWeight.w800,
-                                height: 1.05,
+                                height: 1.0,
                                 shadows: const [
                                   Shadow(
                                     color: Color(0x8A000000),
@@ -1909,11 +1920,70 @@ class _PromptChoiceSection extends StatelessWidget {
                               ),
                             ),
                             const SizedBox(height: 8),
-                            Text(
-                              'Pick 1',
-                              style: theme.textTheme.labelLarge?.copyWith(
-                                color: Colors.white.withValues(alpha: 0.92),
-                                fontWeight: FontWeight.w700,
+                            Expanded(
+                              child: Align(
+                                alignment: Alignment.bottomLeft,
+                                child: SingleChildScrollView(
+                                  primary: false,
+                                  child: DecoratedBox(
+                                    decoration: BoxDecoration(
+                                      color: Colors.black.withValues(
+                                        alpha: 0.28,
+                                      ),
+                                      borderRadius: BorderRadius.circular(16),
+                                      border: Border.all(
+                                        color: Colors.white.withValues(
+                                          alpha: 0.16,
+                                        ),
+                                      ),
+                                      boxShadow: const [
+                                        BoxShadow(
+                                          color: Color(0x26000000),
+                                          blurRadius: 16,
+                                          offset: Offset(0, 8),
+                                        ),
+                                      ],
+                                    ),
+                                    child: Padding(
+                                      padding: const EdgeInsets.fromLTRB(
+                                        8,
+                                        8,
+                                        8,
+                                        8,
+                                      ),
+                                      child: LayoutBuilder(
+                                        builder: (context, constraints) {
+                                          return Wrap(
+                                            spacing: 6,
+                                            runSpacing: 6,
+                                            children: [
+                                              for (final option
+                                                  in choice.options)
+                                                ConstrainedBox(
+                                                  constraints: BoxConstraints(
+                                                    maxWidth:
+                                                        constraints.maxWidth,
+                                                  ),
+                                                  child: _PromptOptionButton(
+                                                    option: option,
+                                                    selected:
+                                                        choice.selectedOption ==
+                                                            option,
+                                                    enabled: enabled,
+                                                    onTap: enabled
+                                                        ? () => onSelect(
+                                                              option,
+                                                            )
+                                                        : null,
+                                                  ),
+                                                ),
+                                            ],
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                  ),
+                                ),
                               ),
                             ),
                           ],
@@ -1933,23 +2003,59 @@ class _PromptChoiceSection extends StatelessWidget {
                   color: _demoInk,
                 ),
               ),
-              const SizedBox(height: 12),
-              for (var index = 0;
-                  index < choice.options.length;
-                  index += 1) ...[
-                _PromptOptionButton(
-                  option: choice.options[index],
-                  selected: choice.selectedOption == choice.options[index],
-                  enabled: enabled,
-                  onTap: enabled ? () => onSelect(choice.options[index]) : null,
-                ),
-                if (index < choice.options.length - 1)
-                  const SizedBox(height: 8),
-              ],
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+class _StoryTextureBackdrop extends StatelessWidget {
+  const _StoryTextureBackdrop({required this.seed});
+
+  final String seed;
+
+  @override
+  Widget build(BuildContext context) {
+    final random = Random(_stableSeedFromString('$seed-texture-layout'));
+    final resolvedTextureAsset = _storyTextureAssetForSeed(seed);
+    final alignment = Alignment(
+      -1 + (random.nextDouble() * 2),
+      -1 + (random.nextDouble() * 2),
+    );
+    final rotation = (random.nextDouble() * 2 - 1) * (pi / 24);
+    final scale = 1 + (random.nextDouble() * 0.2);
+    final blurSigma = 1.4 + (random.nextDouble() * 1.4);
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final devicePixelRatio = MediaQuery.maybeDevicePixelRatioOf(context) ??
+            View.of(context).devicePixelRatio;
+        final targetDecodeWidth = _storyTargetTextureDecodeWidth(
+          constraints: constraints,
+          devicePixelRatio: devicePixelRatio,
+          scale: scale,
+        );
+        return ClipRect(
+          child: ImageFiltered(
+            imageFilter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
+            child: Transform.rotate(
+              angle: rotation,
+              child: Transform.scale(
+                scale: scale,
+                child: Image.asset(
+                  resolvedTextureAsset,
+                  fit: BoxFit.cover,
+                  alignment: alignment,
+                  cacheWidth: targetDecodeWidth,
+                  filterQuality: FilterQuality.low,
+                ),
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -1971,40 +2077,47 @@ class _PromptOptionButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Opacity(
-      opacity: enabled ? 1 : 0.82,
+      opacity: enabled ? 1 : 0.84,
       child: Material(
         color: Colors.transparent,
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(999),
           child: Ink(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
             decoration: BoxDecoration(
-              color: selected ? _demoAccentSoft : _demoBackground,
-              borderRadius: BorderRadius.circular(14),
+              color: selected
+                  ? Colors.white.withValues(alpha: 0.94)
+                  : Colors.white.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(999),
               border: Border.all(
-                color: selected ? _demoAccent : _demoBorder,
+                color: selected
+                    ? _demoAccent
+                    : Colors.white.withValues(alpha: 0.24),
               ),
             ),
             child: Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Expanded(
-                  child: Text(
-                    option,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: _demoInk,
-                      fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
-                      height: 1.3,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
                 Icon(
                   selected
                       ? Icons.check_circle_rounded
                       : Icons.radio_button_unchecked_rounded,
-                  color: selected ? _demoAccent : _demoMutedInk,
-                  size: 20,
+                  color: selected ? _demoAccent : Colors.white,
+                  size: 16,
+                ),
+                const SizedBox(width: 7),
+                Flexible(
+                  child: Text(
+                    option,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: selected ? _demoInk : Colors.white,
+                      fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                      height: 1.15,
+                    ),
+                  ),
                 ),
               ],
             ),

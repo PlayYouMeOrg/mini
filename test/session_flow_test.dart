@@ -110,6 +110,28 @@ void main() {
 
       expect(find.text('Signup'), findsOneWidget);
       expect(find.text('Matching'), findsOneWidget);
+      expect(find.text('Story'), findsOneWidget);
+    });
+
+    testWidgets('shows story mode directly from preview controls', (
+      tester,
+    ) async {
+      await _pumpFlow(
+        tester,
+        initialUri: Uri.parse('https://example.com/?preview=1'),
+      );
+
+      await tester.tap(find.text('Story'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      await _dismissGotItIfVisible(tester);
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(find.text('Story Cards'), findsOneWidget);
+      expect(find.text('Story mode'), findsOneWidget);
+      expect(
+          find.byIcon(Icons.radio_button_unchecked_rounded), findsNWidgets(9));
     });
 
     testWidgets('shows error screen when explicit session boot fails', (
@@ -167,11 +189,19 @@ void main() {
         id: 'player-1',
         name: 'Avery',
         partnerId: 'player-2',
+        currentRoundPrompts: const ['p1', 'p2', 'p3', storyModePromptId],
+        askedPromptIds: const ['p1', 'p2', 'p3'],
+        currentPromptIndex: 3,
+        activeTurnPlayerId: null,
       );
       final partner = _buildPairedPlayer(
         id: 'player-2',
         name: 'Taylor',
         partnerId: 'player-1',
+        currentRoundPrompts: const ['p1b', 'p2b', 'p3b', storyModePromptId],
+        askedPromptIds: const ['p1b', 'p2b', 'p3b'],
+        currentPromptIndex: 3,
+        activeTurnPlayerId: null,
       );
       final fakeRtdbService = FakeRtdbService(
         sessions: <String, SessionRecord>{
@@ -202,11 +232,7 @@ void main() {
       );
 
       await tester.pump();
-      if (find.text('Got it').evaluate().isNotEmpty) {
-        await tester.tap(find.text('Got it'));
-        await tester.pump();
-        await tester.pump(const Duration(milliseconds: 200));
-      }
+      await _dismissGotItIfVisible(tester);
 
       final gameView = tester.widget<GameView>(find.byType(GameView));
       await gameView.onContinueInteraction();
@@ -215,7 +241,6 @@ void main() {
 
       expect(me.interactionRound, 1);
       expect(me.continueVoteRound, 2);
-      expect(find.text('Waiting for them...'), findsOneWidget);
       expect(
         find.text('You picked keep going. Round 2 starts only if they do too.'),
         findsOneWidget,
@@ -227,9 +252,17 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 50));
 
-      expect(me.interactionRound, 2);
-      expect(me.continueVoteRound, isNull);
-      expect(find.text('Prompt 4'), findsWidgets);
+      final updatedMe = fakeRtdbService.players['demo-public']![me.id]!;
+      final updatedPartner =
+          fakeRtdbService.players['demo-public']![partner.id]!;
+      expect(updatedMe.interactionRound, 2);
+      expect(updatedMe.continueVoteRound, isNull);
+      expect(updatedMe.currentRoundPrompts,
+          isNot(updatedPartner.currentRoundPrompts));
+      expect(updatedMe.currentRoundPrompts, hasLength(3));
+      expect(updatedPartner.currentRoundPrompts, hasLength(3));
+      expect(updatedMe.activeTurnPlayerId, 'player-2');
+      expect(find.text('Ask same question'), findsOneWidget);
     });
 
     testWidgets(
@@ -239,11 +272,19 @@ void main() {
           id: 'player-1',
           name: 'Avery',
           partnerId: 'player-2',
+          currentRoundPrompts: const ['p1', 'p2', 'p3', storyModePromptId],
+          askedPromptIds: const ['p1', 'p2', 'p3'],
+          currentPromptIndex: 3,
+          activeTurnPlayerId: null,
         );
         final partner = _buildPairedPlayer(
           id: 'player-2',
           name: 'Taylor',
           partnerId: 'player-1',
+          currentRoundPrompts: const ['p1b', 'p2b', 'p3b', storyModePromptId],
+          askedPromptIds: const ['p1b', 'p2b', 'p3b'],
+          currentPromptIndex: 3,
+          activeTurnPlayerId: null,
         );
         final fakeRtdbService = FakeRtdbService(
           sessions: <String, SessionRecord>{
@@ -274,18 +315,12 @@ void main() {
         );
 
         await tester.pump();
-        if (find.text('Got it').evaluate().isNotEmpty) {
-          await tester.tap(find.text('Got it'));
-          await tester.pump();
-          await tester.pump(const Duration(milliseconds: 200));
-        }
+        await _dismissGotItIfVisible(tester);
 
         final gameView = tester.widget<GameView>(find.byType(GameView));
         await gameView.onContinueInteraction();
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 50));
-
-        expect(find.text('Waiting for them...'), findsOneWidget);
 
         await fakeRtdbService.clearPairing('demo-public', partner.id);
         await fakeRtdbService.clearPairing('demo-public', me.id);
@@ -353,6 +388,7 @@ void main() {
                 required int promptIndex,
                 required String partnerId,
               }) async {},
+              onAskSameQuestion: () async {},
               onContinueInteraction: () async {},
               promptCatalog: promptCatalog,
               unpairedInstructions:
@@ -365,11 +401,7 @@ void main() {
 
       await tester.pumpAndSettle();
 
-      if (find.text('Got it').evaluate().isNotEmpty) {
-        await tester.tap(find.text('Got it'));
-        await tester.pump();
-        await tester.pump(const Duration(milliseconds: 200));
-      }
+      await _dismissGotItIfVisible(tester);
 
       final promptText = tester.widgetList<Text>(find.text(longPrompt)).first;
       expect(promptText.style?.fontSize, lessThan(28));
@@ -380,7 +412,8 @@ void main() {
     ) async {
       final promptCatalog =
           await FakePromptCatalogService().loadDatingCatalog();
-      final player = _buildPairedPlayer(
+      StateSetter? rebuild;
+      var player = _buildPairedPlayer(
         id: 'player-1',
         name: 'Preview User',
         partnerId: 'player-2',
@@ -392,32 +425,52 @@ void main() {
 
       await tester.pumpWidget(
         MaterialApp(
-          home: Scaffold(
-            body: GameView(
-              sessionId: 'test-session',
-              player: player,
-              session: SessionRecord(status: 'started', round: 1),
-              onSubmitCode: (_) async {},
-              onDrawPrompt: ({
-                required int promptIndex,
-                required String partnerId,
-              }) async {},
-              onContinueInteraction: () async {},
-              promptCatalog: promptCatalog,
-              unpairedInstructions:
-                  'Enter any 4-character code to connect instantly.',
-              codeEntryPrompt: 'Enter any 4-character code to start:',
-            ),
+          home: StatefulBuilder(
+            builder: (context, setState) {
+              rebuild = setState;
+              return Scaffold(
+                body: GameView(
+                  sessionId: 'test-session',
+                  player: player,
+                  session: SessionRecord(status: 'started', round: 1),
+                  onSubmitCode: (_) async {},
+                  onDrawPrompt: ({
+                    required int promptIndex,
+                    required String partnerId,
+                  }) async {
+                    rebuild?.call(() {
+                      player = PlayerRecord.fromJson(
+                        player.id,
+                        Map<String, dynamic>.from(player.toJson()),
+                      )
+                        ..currentPromptIndex = 1
+                        ..activeTurnPlayerId = null;
+                    });
+                  },
+                  onAskSameQuestion: () async {},
+                  onContinueInteraction: () async {},
+                  promptCatalog: promptCatalog,
+                  unpairedInstructions:
+                      'Enter any 4-character code to connect instantly.',
+                  codeEntryPrompt: 'Enter any 4-character code to start:',
+                ),
+              );
+            },
           ),
         ),
       );
 
       await tester.pumpAndSettle();
-      if (find.text('Got it').evaluate().isNotEmpty) {
-        await tester.tap(find.text('Got it'));
-        await tester.pump();
-        await tester.pump(const Duration(milliseconds: 200));
-      }
+      await _dismissGotItIfVisible(tester);
+      await tester.pump(const Duration(seconds: 15));
+      await tester.pump();
+
+      expect(find.text('Pass turn'), findsOneWidget);
+
+      await tester.ensureVisible(find.text('Pass turn'));
+      await tester.tap(find.text('Pass turn'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
       await tester.pump(const Duration(seconds: 15));
       await tester.pump();
 
@@ -433,19 +486,17 @@ void main() {
       expect(find.text('Keep going'), findsNothing);
     });
 
-    testWidgets('shows server-backed story options on the fourth card', (
+    testWidgets('shows same-question prompt while waiting for partner turn', (
       tester,
     ) async {
       final promptCatalog =
           await FakePromptCatalogService().loadDatingCatalog();
-      final fakeRtdbService = FakeRtdbService();
       final player = _buildPairedPlayer(
         id: 'player-1',
         name: 'Preview User',
         partnerId: 'player-2',
-        currentRoundPrompts: const ['p1', 'p2', 'p3', storyModePromptId],
-        askedPromptIds: const ['p1', 'p2', 'p3'],
-        currentPromptIndex: 3,
+        currentPromptIndex: 0,
+        activeTurnPlayerId: 'player-2',
       );
 
       await tester.pumpWidget(
@@ -460,6 +511,56 @@ void main() {
                 required int promptIndex,
                 required String partnerId,
               }) async {},
+              onAskSameQuestion: () async {},
+              onContinueInteraction: () async {},
+              promptCatalog: promptCatalog,
+              unpairedInstructions:
+                  'Enter any 4-character code to connect instantly.',
+              codeEntryPrompt: 'Enter any 4-character code to start:',
+            ),
+          ),
+        ),
+      );
+
+      await tester.pumpAndSettle();
+      await _dismissGotItIfVisible(tester);
+
+      expect(find.text('Ask same question'), findsOneWidget);
+      expect(
+        find.textContaining('your next turn will be skipped'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('shows server-backed story options on the fourth card', (
+      tester,
+    ) async {
+      final promptCatalog =
+          await FakePromptCatalogService().loadDatingCatalog();
+      final fakeRtdbService = FakeRtdbService();
+      final player = _buildPairedPlayer(
+        id: 'player-1',
+        name: 'Preview User',
+        partnerId: 'player-2',
+        currentRoundPrompts: const ['p1', 'p2', 'p3', storyModePromptId],
+        askedPromptIds: const ['p1', 'p2', 'p3'],
+        currentPromptIndex: 3,
+        activeTurnPlayerId: null,
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: GameView(
+              sessionId: 'test-session',
+              player: player,
+              session: SessionRecord(status: 'started', round: 1),
+              onSubmitCode: (_) async {},
+              onDrawPrompt: ({
+                required int promptIndex,
+                required String partnerId,
+              }) async {},
+              onAskSameQuestion: () async {},
               onContinueInteraction: () async {},
               promptCatalog: promptCatalog,
               storyPromptCatalogService: FakeStoryPromptCatalogService(),
@@ -473,22 +574,177 @@ void main() {
       );
 
       await tester.pumpAndSettle();
-      if (find.text('Got it').evaluate().isNotEmpty) {
-        await tester.tap(find.text('Got it'));
-        await tester.pump();
-        await tester.pump(const Duration(milliseconds: 200));
-      }
+      await _dismissGotItIfVisible(tester);
       await tester.pump(const Duration(seconds: 15));
       await tester.pump();
 
+      expect(find.text('Story Cards'), findsOneWidget);
       expect(find.text('Story mode'), findsOneWidget);
       expect(find.text('Action'), findsOneWidget);
       expect(find.text('Animal'), findsOneWidget);
       expect(find.text('Clothing'), findsOneWidget);
+      expect(find.text('End interaction'), findsNothing);
+      expect(find.text('Finish interaction'), findsNothing);
       expect(
         find.byIcon(Icons.radio_button_unchecked_rounded),
         findsNWidgets(9),
       );
+    });
+
+    testWidgets('hides story prompts after submit and shows loading state', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(const Size(1200, 1600));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      final promptCatalog =
+          await FakePromptCatalogService().loadDatingCatalog();
+      final fakeRtdbService = FakeRtdbService();
+      final player = _buildPairedPlayer(
+        id: 'player-1',
+        name: 'Preview User',
+        partnerId: 'player-2',
+        currentRoundPrompts: const ['p1', 'p2', 'p3', storyModePromptId],
+        askedPromptIds: const ['p1', 'p2', 'p3'],
+        currentPromptIndex: 3,
+        activeTurnPlayerId: null,
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: GameView(
+              sessionId: 'test-session',
+              player: player,
+              session: SessionRecord(status: 'started', round: 1),
+              onSubmitCode: (_) async {},
+              onDrawPrompt: ({
+                required int promptIndex,
+                required String partnerId,
+              }) async {},
+              onAskSameQuestion: () async {},
+              onContinueInteraction: () async {},
+              promptCatalog: promptCatalog,
+              storyPromptCatalogService: FakeStoryPromptCatalogService(),
+              storyRtdbService: fakeRtdbService,
+              unpairedInstructions:
+                  'Enter any 4-character code to connect instantly.',
+              codeEntryPrompt: 'Enter any 4-character code to start:',
+            ),
+          ),
+        ),
+      );
+
+      await tester.pumpAndSettle();
+      await _dismissGotItIfVisible(tester);
+      await tester.pump(const Duration(seconds: 15));
+      await tester.pump();
+
+      final firstChoice =
+          find.byIcon(Icons.radio_button_unchecked_rounded).at(0);
+      await tester.ensureVisible(firstChoice);
+      await tester.tap(firstChoice);
+      await tester.pump();
+
+      final secondChoice =
+          find.byIcon(Icons.radio_button_unchecked_rounded).at(3);
+      await tester.ensureVisible(secondChoice);
+      await tester.tap(secondChoice);
+      await tester.pump();
+
+      final thirdChoice =
+          find.byIcon(Icons.radio_button_unchecked_rounded).at(6);
+      await tester.ensureVisible(thirdChoice);
+      await tester.tap(thirdChoice);
+      await tester.pump();
+      await tester.ensureVisible(find.text('Submit your 3 answers'));
+      await tester.tap(find.text('Submit your 3 answers'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      expect(find.text('Submit your 3 answers'), findsNothing);
+      expect(find.text('Choose 1 item from each category card.'), findsNothing);
+      expect(find.text('Writing your story'), findsOneWidget);
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    });
+
+    testWidgets('shows end interaction only after a story is available', (
+      tester,
+    ) async {
+      final promptCatalog =
+          await FakePromptCatalogService().loadDatingCatalog();
+      final fakeRtdbService = FakeRtdbService();
+      final player = _buildPairedPlayer(
+        id: 'player-1',
+        name: 'Preview User',
+        partnerId: 'player-2',
+        currentRoundPrompts: const ['p1', 'p2', 'p3', storyModePromptId],
+        askedPromptIds: const ['p1', 'p2', 'p3'],
+        currentPromptIndex: 3,
+        activeTurnPlayerId: null,
+      );
+      final pairId = buildStoryPairId(
+        sessionId: 'test-session',
+        playerId: player.id,
+        partnerId: player.pairedWith!,
+        pairRound: player.pairedRound ?? 1,
+      );
+      fakeRtdbService.storyPairPlayers[pairId] = {
+        player.id: _buildCompletedStoryPairPlayer(
+          playerId: player.id,
+          playerName: player.name,
+          partnerId: player.pairedWith!,
+          sessionId: 'test-session',
+          pairRound: player.pairedRound ?? 1,
+        ),
+      };
+      fakeRtdbService.storyPairStories[pairId] =
+          'They left with the same private joke and a second date.';
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: GameView(
+              sessionId: 'test-session',
+              player: player,
+              session: SessionRecord(status: 'started', round: 1),
+              onSubmitCode: (_) async {},
+              onDrawPrompt: ({
+                required int promptIndex,
+                required String partnerId,
+              }) async {},
+              onAskSameQuestion: () async {},
+              onContinueInteraction: () async {},
+              promptCatalog: promptCatalog,
+              storyPromptCatalogService: FakeStoryPromptCatalogService(),
+              storyRtdbService: fakeRtdbService,
+              unpairedInstructions:
+                  'Enter any 4-character code to connect instantly.',
+              codeEntryPrompt: 'Enter any 4-character code to start:',
+            ),
+          ),
+        ),
+      );
+
+      await tester.pumpAndSettle();
+      await _dismissGotItIfVisible(tester);
+      await tester.pump(const Duration(seconds: 15));
+      await tester.pump();
+
+      expect(find.text('Story Cards'), findsOneWidget);
+      expect(find.text('Generated result'), findsOneWidget);
+      expect(
+        find.text(
+          'They left with the same private joke and a second date.',
+        ),
+        findsOneWidget,
+      );
+
+      Navigator.of(tester.element(find.text('Story Cards'))).pop();
+      await tester.pumpAndSettle();
+
+      expect(find.text('End interaction'), findsOneWidget);
+      expect(find.text('Open story page again'), findsOneWidget);
     });
   });
 }
@@ -516,6 +772,16 @@ Future<void> _pumpFlow(
   await tester.pump(const Duration(milliseconds: 20));
 }
 
+Future<void> _dismissGotItIfVisible(WidgetTester tester) async {
+  final finder = find.text('Got it');
+  if (finder.evaluate().isEmpty) return;
+
+  await tester.ensureVisible(finder);
+  await tester.tap(finder, warnIfMissed: false);
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 200));
+}
+
 class FakeRtdbService extends RtdbService {
   FakeRtdbService({
     Map<String, SessionRecord>? sessions,
@@ -535,6 +801,24 @@ class FakeRtdbService extends RtdbService {
   final Map<String, bool> storyPairReady = <String, bool>{};
   final Object? fetchSessionError;
   int savePlayerCalls = 0;
+
+  @override
+  Future<Object?> fetchValue(String path) async {
+    if (path == 'mini/prompts') {
+      return const {
+        'Story': {
+          'playerPrompt': 'Choose one option from each card.',
+          'categories': {
+            'Action': ['kiss', 'tease', 'chase', 'hide'],
+            'Animal': ['fox', 'owl', 'wolf', 'cat'],
+            'Clothing': ['leather', 'silk', 'denim', 'linen'],
+          },
+        },
+      };
+    }
+
+    throw StateError('Unexpected fetchValue path: $path');
+  }
 
   @override
   Future<SessionRecord> fetchSession(String sessionId) async {
@@ -593,7 +877,9 @@ class FakeRtdbService extends RtdbService {
       ..pairedRound = null
       ..partnerCode = null
       ..interactionRound = 1
-      ..continueVoteRound = null;
+      ..continueVoteRound = null
+      ..activeTurnPlayerId = null
+      ..skipNextTurn = false;
   }
 
   @override
@@ -605,6 +891,8 @@ class FakeRtdbService extends RtdbService {
     required List<String> askedPromptIds,
     int interactionRound = 1,
     int? continueVoteRound,
+    String? activeTurnPlayerId,
+    bool skipNextTurn = false,
   }) async {
     final player = players[sessionId]?[playerId];
     if (player == null) {
@@ -616,6 +904,8 @@ class FakeRtdbService extends RtdbService {
       ..continueVoteRound = continueVoteRound
       ..currentPromptRound = round
       ..currentPromptIndex = 0
+      ..activeTurnPlayerId = activeTurnPlayerId
+      ..skipNextTurn = skipNextTurn
       ..currentRoundPrompts = List<String>.from(promptEntries)
       ..askedPromptIds = List<String>.from(askedPromptIds);
   }
@@ -632,6 +922,20 @@ class FakeRtdbService extends RtdbService {
     }
 
     player.continueVoteRound = continueVoteRound;
+  }
+
+  @override
+  Future<void> setSkipNextTurn({
+    required String sessionId,
+    required String playerId,
+    required bool skipNextTurn,
+  }) async {
+    final player = players[sessionId]?[playerId];
+    if (player == null) {
+      throw StateError('Player record not found.');
+    }
+
+    player.skipNextTurn = skipNextTurn;
   }
 
   @override
@@ -673,10 +977,10 @@ class FakeRtdbService extends RtdbService {
             pairId, () => <String, StoryPairPlayerRecord>{})[player.playerId] =
         StoryPairPlayerRecord.fromJson(player.toJson());
 
-    final storyPrompt = buildStoryPairPrompt(
-      storyPairPlayers[pairId]!.values,
-    );
-    if (storyPrompt == null) {
+    final players = storyPairPlayers[pairId]!.values;
+    final storyReady = isStoryPairReady(players);
+    final storyPrompt = storyReady ? buildStoryPairPrompt(players) : null;
+    if (!storyReady || storyPrompt == null) {
       storyPairPrompts.remove(pairId);
       storyPairReady[pairId] = false;
       return;
@@ -701,22 +1005,50 @@ class FakePromptCatalogService extends PromptCatalogService {
       sets: <String, List<PromptItem>>{
         'icebreakers_level1': <PromptItem>[
           PromptItem(id: 'p1', text: 'Prompt 1'),
+          PromptItem(id: 'p1b', text: 'Prompt 1B'),
+          PromptItem(id: 'p1c', text: 'Prompt 1C'),
+          PromptItem(id: 'p1d', text: 'Prompt 1D'),
         ],
         'activities_level1': <PromptItem>[
           PromptItem(id: 'p2', text: 'Prompt 2'),
+          PromptItem(id: 'p2b', text: 'Prompt 2B'),
+          PromptItem(id: 'p2c', text: 'Prompt 2C'),
+          PromptItem(id: 'p2d', text: 'Prompt 2D'),
         ],
         'dating_questions_level1': <PromptItem>[
           PromptItem(id: 'p3', text: 'Prompt 3'),
+          PromptItem(id: 'p3b', text: 'Prompt 3B'),
+          PromptItem(id: 'p3c', text: 'Prompt 3C'),
+          PromptItem(id: 'p3d', text: 'Prompt 3D'),
         ],
         'icebreakers_level2': <PromptItem>[
           PromptItem(id: 'p4', text: 'Prompt 4'),
+          PromptItem(id: 'p4b', text: 'Prompt 4B'),
+          PromptItem(id: 'p4c', text: 'Prompt 4C'),
+          PromptItem(id: 'p4d', text: 'Prompt 4D'),
+          PromptItem(id: 'p4e', text: 'Prompt 4E'),
+          PromptItem(id: 'p4f', text: 'Prompt 4F'),
         ],
       },
       itemsById: <String, PromptItem>{
         'p1': PromptItem(id: 'p1', text: 'Prompt 1'),
+        'p1b': PromptItem(id: 'p1b', text: 'Prompt 1B'),
+        'p1c': PromptItem(id: 'p1c', text: 'Prompt 1C'),
+        'p1d': PromptItem(id: 'p1d', text: 'Prompt 1D'),
         'p2': PromptItem(id: 'p2', text: 'Prompt 2'),
+        'p2b': PromptItem(id: 'p2b', text: 'Prompt 2B'),
+        'p2c': PromptItem(id: 'p2c', text: 'Prompt 2C'),
+        'p2d': PromptItem(id: 'p2d', text: 'Prompt 2D'),
         'p3': PromptItem(id: 'p3', text: 'Prompt 3'),
+        'p3b': PromptItem(id: 'p3b', text: 'Prompt 3B'),
+        'p3c': PromptItem(id: 'p3c', text: 'Prompt 3C'),
+        'p3d': PromptItem(id: 'p3d', text: 'Prompt 3D'),
         'p4': PromptItem(id: 'p4', text: 'Prompt 4'),
+        'p4b': PromptItem(id: 'p4b', text: 'Prompt 4B'),
+        'p4c': PromptItem(id: 'p4c', text: 'Prompt 4C'),
+        'p4d': PromptItem(id: 'p4d', text: 'Prompt 4D'),
+        'p4e': PromptItem(id: 'p4e', text: 'Prompt 4E'),
+        'p4f': PromptItem(id: 'p4f', text: 'Prompt 4F'),
       },
     );
   }
@@ -770,6 +1102,8 @@ class FakeSessionStateStore extends SessionStateStore {
   }
 }
 
+const _defaultTurnOwner = Object();
+
 PlayerRecord _buildPairedPlayer({
   required String id,
   required String name,
@@ -779,6 +1113,8 @@ PlayerRecord _buildPairedPlayer({
   List<String> currentRoundPrompts = const ['p1', 'p2', 'p3'],
   List<String> askedPromptIds = const ['p1', 'p2', 'p3'],
   int currentPromptIndex = 2,
+  Object? activeTurnPlayerId = _defaultTurnOwner,
+  bool skipNextTurn = false,
 }) {
   return PlayerRecord(
     id: id,
@@ -796,7 +1132,48 @@ PlayerRecord _buildPairedPlayer({
     continueVoteRound: continueVoteRound,
     currentPromptRound: 1,
     currentPromptIndex: currentPromptIndex,
+    activeTurnPlayerId: identical(activeTurnPlayerId, _defaultTurnOwner)
+        ? id
+        : activeTurnPlayerId as String?,
+    skipNextTurn: skipNextTurn,
     currentRoundPrompts: currentRoundPrompts,
     askedPromptIds: askedPromptIds,
+  );
+}
+
+StoryPairPlayerRecord _buildCompletedStoryPairPlayer({
+  required String playerId,
+  required String playerName,
+  required String partnerId,
+  required String sessionId,
+  required int pairRound,
+}) {
+  return StoryPairPlayerRecord(
+    playerId: playerId,
+    name: playerName,
+    sessionId: sessionId,
+    partnerId: partnerId,
+    pairRound: pairRound,
+    completedAt: 1,
+    choices: const [
+      StoryPairChoiceRecord(
+        typeName: 'Action',
+        category: 'Action',
+        options: ['kiss', 'tease', 'chase', 'hide'],
+        selectedOption: 'kiss',
+      ),
+      StoryPairChoiceRecord(
+        typeName: 'Animal',
+        category: 'Animal',
+        options: ['fox', 'owl', 'wolf', 'cat'],
+        selectedOption: 'fox',
+      ),
+      StoryPairChoiceRecord(
+        typeName: 'Clothing',
+        category: 'Clothing',
+        options: ['leather', 'silk', 'denim', 'linen'],
+        selectedOption: 'leather',
+      ),
+    ],
   );
 }

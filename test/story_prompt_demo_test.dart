@@ -223,7 +223,7 @@ void main() {
   });
 
   group('buildStoryPairPrompt', () {
-    test('joins both names and all six selections into one field', () {
+    test('formats names and selections with commas and spacing', () {
       final prompt = buildStoryPairPrompt([
         StoryPairPlayerRecord(
           playerId: 'player-b',
@@ -285,7 +285,95 @@ void main() {
 
       expect(
         prompt,
-        'Alex\nSam\nAction: Kiss\nAnimal: Fox\nClothing: Leather\nSetting: Rooftop\nWeather: Rain\nTwist: Fireworks',
+        'Names: Alex, Sam\nAlex: Action: Kiss, Animal: Fox, Clothing: Leather\nSam: Setting: Rooftop, Weather: Rain, Twist: Fireworks',
+      );
+    });
+
+    test('requires both players to finish before the story is ready', () {
+      final alex = StoryPairPlayerRecord(
+        playerId: 'player-a',
+        name: 'Alex',
+        sessionId: 'session-1',
+        partnerId: 'player-b',
+        pairRound: 1,
+        completedAt: 1,
+        choices: const [
+          StoryPairChoiceRecord(
+            typeName: 'Action',
+            category: 'Action',
+            options: ['Kiss', 'Tease', 'Chase'],
+            selectedOption: 'Kiss',
+          ),
+          StoryPairChoiceRecord(
+            typeName: 'Animal',
+            category: 'Animal',
+            options: ['Fox', 'Owl', 'Wolf'],
+            selectedOption: 'Fox',
+          ),
+          StoryPairChoiceRecord(
+            typeName: 'Clothing',
+            category: 'Clothing',
+            options: ['Leather', 'Silk', 'Denim'],
+            selectedOption: 'Leather',
+          ),
+        ],
+      );
+      final samPending = StoryPairPlayerRecord(
+        playerId: 'player-b',
+        name: 'Sam',
+        sessionId: 'session-1',
+        partnerId: 'player-a',
+        pairRound: 1,
+        choices: const [
+          StoryPairChoiceRecord(
+            typeName: 'Setting',
+            category: 'Setting',
+            options: ['Rooftop', 'Beach', 'Cabin'],
+            selectedOption: 'Rooftop',
+          ),
+          StoryPairChoiceRecord(
+            typeName: 'Weather',
+            category: 'Weather',
+            options: ['Rain', 'Sun', 'Snow'],
+            selectedOption: 'Rain',
+          ),
+          StoryPairChoiceRecord(
+            typeName: 'Twist',
+            category: 'Twist',
+            options: ['Fireworks', 'Music', 'Detour'],
+            selectedOption: 'Fireworks',
+          ),
+        ],
+      );
+      final samComplete = StoryPairPlayerRecord(
+        playerId: 'player-b',
+        name: 'Sam',
+        sessionId: 'session-1',
+        partnerId: 'player-a',
+        pairRound: 1,
+        completedAt: 2,
+        choices: samPending.choices,
+      );
+
+      expect(isStoryPairReady([alex, samPending]), isFalse);
+      expect(isStoryPairReady([alex, samComplete]), isTrue);
+    });
+  });
+
+  group('StoryPairResultRecord.fromJson', () {
+    test('extracts nested story text values', () {
+      final result = StoryPairResultRecord.fromJson({
+        'status': 'complete',
+        'text': {
+          'value': 'Two strangers kept choosing the same moonlit detour.',
+        },
+      });
+
+      expect(result.isComplete, isTrue);
+      expect(result.hasText, isTrue);
+      expect(
+        result.text,
+        'Two strangers kept choosing the same moonlit detour.',
       );
     });
   });

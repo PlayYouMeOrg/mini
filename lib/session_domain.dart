@@ -142,6 +142,8 @@ class PlayerRecord {
     this.continueVoteRound,
     this.currentPromptRound,
     this.currentPromptIndex = 0,
+    this.activeTurnPlayerId,
+    this.skipNextTurn = false,
     this.currentRoundPrompts = const <String>[],
     this.askedPromptIds = const <String>[],
     this.matchedPlayerIds = const <String>[],
@@ -164,6 +166,8 @@ class PlayerRecord {
   int? continueVoteRound;
   int? currentPromptRound;
   int currentPromptIndex;
+  String? activeTurnPlayerId;
+  bool skipNextTurn;
   List<String> currentRoundPrompts;
   List<String> askedPromptIds;
   List<String> matchedPlayerIds;
@@ -189,6 +193,8 @@ class PlayerRecord {
       'continueVoteRound': continueVoteRound,
       'currentPromptRound': currentPromptRound,
       'currentPromptIndex': currentPromptIndex,
+      'activeTurnPlayerId': activeTurnPlayerId,
+      'skipNextTurn': skipNextTurn,
       'currentRoundPrompts': currentRoundPrompts,
       'askedPromptIds': askedPromptIds,
       'matchedPlayerIds': matchedPlayerIds,
@@ -217,6 +223,11 @@ class PlayerRecord {
       continueVoteRound: (json['continueVoteRound'] as num?)?.toInt(),
       currentPromptRound: (json['currentPromptRound'] as num?)?.toInt(),
       currentPromptIndex: (json['currentPromptIndex'] as num?)?.toInt() ?? 0,
+      activeTurnPlayerId:
+          (json['activeTurnPlayerId'] as String?)?.trim().isEmpty ?? true
+              ? null
+              : json['activeTurnPlayerId'] as String?,
+      skipNextTurn: (json['skipNextTurn'] ?? false) as bool,
       currentRoundPrompts: ((json['currentRoundPrompts'] as List?) ?? const [])
           .map((item) => item.toString())
           .toList(),
@@ -428,6 +439,8 @@ class RtdbService {
     me.pairedRound = round;
     me.interactionRound = 1;
     me.continueVoteRound = null;
+    me.activeTurnPlayerId = null;
+    me.skipNextTurn = false;
     me.matchedPlayerIds = {
       ...me.matchedPlayerIds,
       partner.id,
@@ -437,6 +450,8 @@ class RtdbService {
     partner.pairedRound = round;
     partner.interactionRound = 1;
     partner.continueVoteRound = null;
+    partner.activeTurnPlayerId = null;
+    partner.skipNextTurn = false;
     partner.matchedPlayerIds = {
       ...partner.matchedPlayerIds,
       me.id,
@@ -455,6 +470,8 @@ class RtdbService {
         'partnerCode': null,
         'interactionRound': 1,
         'continueVoteRound': null,
+        'activeTurnPlayerId': null,
+        'skipNextTurn': false,
         'updatedAt': DateTime.now().toIso8601String(),
       },
     );
@@ -490,6 +507,8 @@ class RtdbService {
     required List<String> askedPromptIds,
     int interactionRound = 1,
     int? continueVoteRound,
+    String? activeTurnPlayerId,
+    bool skipNextTurn = false,
   }) async {
     final resp = await _patch(
       '${_sessionBasePath(sessionId)}/players/$playerId',
@@ -498,6 +517,8 @@ class RtdbService {
         'continueVoteRound': continueVoteRound,
         'currentPromptRound': round,
         'currentPromptIndex': 0,
+        'activeTurnPlayerId': activeTurnPlayerId,
+        'skipNextTurn': skipNextTurn,
         'currentRoundPrompts': promptEntries,
         'askedPromptIds': askedPromptIds,
         'updatedAt': DateTime.now().toIso8601String(),
@@ -515,6 +536,21 @@ class RtdbService {
       '${_sessionBasePath(sessionId)}/players/$playerId',
       {
         'continueVoteRound': continueVoteRound,
+        'updatedAt': DateTime.now().toIso8601String(),
+      },
+    );
+    _throwIfNotOk(resp);
+  }
+
+  Future<void> setSkipNextTurn({
+    required String sessionId,
+    required String playerId,
+    required bool skipNextTurn,
+  }) async {
+    final resp = await _patch(
+      '${_sessionBasePath(sessionId)}/players/$playerId',
+      {
+        'skipNextTurn': skipNextTurn,
         'updatedAt': DateTime.now().toIso8601String(),
       },
     );
@@ -559,7 +595,7 @@ class RtdbService {
     final payload = await fetchValue('mini/storyPairs/$pairId');
     if (payload is! Map<String, dynamic>) return null;
 
-    final story = (payload['story'] as String?)?.trim();
+    final story = _extractStoryPairText(payload['story']);
     if (story != null && story.isNotEmpty) {
       return StoryPairResultRecord(
         status: 'complete',
@@ -569,7 +605,7 @@ class RtdbService {
       );
     }
 
-    final storyError = (payload['storyError'] as String?)?.trim();
+    final storyError = _extractStoryPairError(payload['storyError']);
     if (storyError != null && storyError.isNotEmpty) {
       return StoryPairResultRecord(
         status: 'error',
@@ -624,13 +660,14 @@ class RtdbService {
             )
             .toList()
         : const <StoryPairPlayerRecord>[];
-    final storyPrompt = buildStoryPairPrompt(players);
+    final storyReady = isStoryPairReady(players);
+    final storyPrompt = storyReady ? buildStoryPairPrompt(players) : null;
 
     await patchValue(
       'mini/storyPairs/$pairId',
       {
         'storyPrompt': storyPrompt,
-        'storyReady': storyPrompt != null,
+        'storyReady': storyReady,
         'updatedAt': DateTime.now().millisecondsSinceEpoch,
       },
     );
@@ -934,20 +971,35 @@ class StoryPairPlayerRecord {
 }
 
 String? buildStoryPairPrompt(Iterable<StoryPairPlayerRecord> players) {
-  final completedPlayers = players.where((player) => player.isComplete).toList()
-    ..sort((left, right) => left.playerId.compareTo(right.playerId));
+  final completedPlayers = _completedStoryPairPlayers(players);
   if (completedPlayers.length != 2) return null;
 
   return [
-    for (final player in completedPlayers) _storyPairPromptName(player),
-    for (final player in completedPlayers)
-      for (final choice in player.choices) _storyPairPromptChoice(choice),
+    'Names: ${completedPlayers.map(_storyPairPromptDisplayName).join(', ')}',
+    for (final player in completedPlayers) _storyPairPromptBlock(player),
   ].join('\n');
 }
 
-String _storyPairPromptName(StoryPairPlayerRecord player) {
+bool isStoryPairReady(Iterable<StoryPairPlayerRecord> players) {
+  return _completedStoryPairPlayers(players).length == 2;
+}
+
+List<StoryPairPlayerRecord> _completedStoryPairPlayers(
+  Iterable<StoryPairPlayerRecord> players,
+) {
+  return players.where((player) => player.isComplete).toList()
+    ..sort((left, right) => left.playerId.compareTo(right.playerId));
+}
+
+String _storyPairPromptBlock(StoryPairPlayerRecord player) {
+  final selections = player.choices.map(_storyPairPromptChoice).join(', ');
+  return '${_storyPairPromptDisplayName(player)}: $selections';
+}
+
+String _storyPairPromptDisplayName(StoryPairPlayerRecord player) {
   final name = player.name.trim();
-  return name.isNotEmpty ? name : player.playerId;
+  final resolvedName = name.isNotEmpty ? name : player.playerId;
+  return resolvedName;
 }
 
 String _storyPairPromptChoice(StoryPairChoiceRecord choice) {
@@ -970,6 +1022,7 @@ class StoryPairResultRecord {
   final int? completedAt;
 
   bool get isComplete => status == 'complete';
+  bool get hasText => (text ?? '').trim().isNotEmpty;
   bool get isProcessing => status == 'processing';
   bool get isWaiting => status == 'waiting' || status == 'pending';
   bool get isError => status == 'error';
@@ -984,15 +1037,83 @@ class StoryPairResultRecord {
   }
 
   factory StoryPairResultRecord.fromJson(Map<String, dynamic> json) {
+    final text = _extractStoryPairText(json['text']) ??
+        _extractStoryPairText(json['story']);
+    final error = _extractStoryPairError(json['error']) ??
+        _extractStoryPairError(json['storyError']);
+    final rawStatus = (json['status'] as String?)?.trim();
     return StoryPairResultRecord(
-      status: ((json['status'] ?? 'waiting') as String).trim().isEmpty
-          ? 'waiting'
-          : (json['status'] as String),
-      text: json['text'] as String?,
-      error: json['error'] as String?,
+      status: rawStatus?.isNotEmpty == true
+          ? rawStatus!
+          : text != null
+              ? 'complete'
+              : error != null
+                  ? 'error'
+                  : 'waiting',
+      text: text,
+      error: error,
       completedAt: (json['completedAt'] as num?)?.toInt(),
     );
   }
+}
+
+String? _extractStoryPairText(Object? raw) {
+  return _extractNestedNonEmptyString(
+    raw,
+    preferredKeys: const ['value', 'text', 'story', 'content'],
+  );
+}
+
+String? _extractStoryPairError(Object? raw) {
+  return _extractNestedNonEmptyString(
+    raw,
+    preferredKeys: const ['message', 'error', 'value', 'text'],
+  );
+}
+
+String? _extractNestedNonEmptyString(
+  Object? raw, {
+  required List<String> preferredKeys,
+}) {
+  if (raw is String) {
+    final normalized = raw.trim();
+    return normalized.isEmpty ? null : normalized;
+  }
+
+  if (raw is Iterable) {
+    for (final value in raw) {
+      final extracted = _extractNestedNonEmptyString(
+        value,
+        preferredKeys: preferredKeys,
+      );
+      if (extracted != null) return extracted;
+    }
+    return null;
+  }
+
+  if (raw is Map) {
+    final entries = raw.entries.toList();
+    for (final key in preferredKeys) {
+      for (final entry in entries) {
+        if (entry.key.toString().trim().toLowerCase() != key) continue;
+        final extracted = _extractNestedNonEmptyString(
+          entry.value,
+          preferredKeys: preferredKeys,
+        );
+        if (extracted != null) return extracted;
+      }
+    }
+
+    for (final entry in entries) {
+      final extracted = _extractNestedNonEmptyString(
+        entry.value,
+        preferredKeys: preferredKeys,
+      );
+      if (extracted != null) return extracted;
+    }
+  }
+
+  return null;
 }
 
 String buildStoryPairId({
