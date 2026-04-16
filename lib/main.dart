@@ -19,7 +19,7 @@ const _paper = Color(0xFFF3F3EF);
 const _offWhite = Color(0xFFF5F3EB);
 const _offWhiteBorder = Color(0xFFE6E2D6);
 const _ink = Color(0xFF070707);
-const _panelColor = Color(0xEAF7F1E7);
+const _panelColor = Color(0xEAF5F3EB);
 const _panelStroke = Color(0xFFD8CCBC);
 const _primaryButton = Color(0xFF191512);
 const _secondaryButtonText = Color(0xFF2E2822);
@@ -48,6 +48,24 @@ const _chatGptTextureAssets = [
   'assets/Polaroid3.png',
   'assets/Polaroid4.png',
 ];
+
+const _previewStoryDeck = StoryPromptDeck(
+  playerPrompt: 'Choose one option from each card.',
+  categories: <StoryPromptType>[
+    StoryPromptType(
+      category: 'Action',
+      options: ['kiss', 'tease', 'chase', 'hide'],
+    ),
+    StoryPromptType(
+      category: 'Animal',
+      options: ['fox', 'owl', 'wolf', 'cat'],
+    ),
+    StoryPromptType(
+      category: 'Clothing',
+      options: ['leather', 'silk', 'denim', 'linen'],
+    ),
+  ],
+);
 
 String _textureAssetForSeed(String seed) {
   final rng = Random(seed.hashCode & 0x7fffffff);
@@ -393,6 +411,14 @@ class MiniApp extends StatelessWidget {
             scaffoldBackgroundColor: Colors.transparent,
             textTheme: appTextTheme,
             primaryTextTheme: appTextTheme,
+            cardTheme: CardThemeData(
+              color: _offWhite,
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(18),
+                side: const BorderSide(color: _panelStroke),
+              ),
+            ),
             filledButtonTheme: FilledButtonThemeData(
               style: FilledButton.styleFrom(
                 backgroundColor: _primaryButton,
@@ -425,7 +451,7 @@ class MiniApp extends StatelessWidget {
               ),
             ),
             inputDecorationTheme: InputDecorationTheme(
-              fillColor: const Color(0xFFF9F5ED),
+              fillColor: _offWhite,
               filled: true,
               labelStyle: const TextStyle(color: _ink),
               floatingLabelStyle: const TextStyle(color: _ink),
@@ -573,7 +599,7 @@ class _FatalErrorContent extends StatelessWidget {
       constraints: const BoxConstraints(maxWidth: 420),
       child: DecoratedBox(
         decoration: BoxDecoration(
-          color: const Color(0xFFF4E8D6),
+          color: _offWhite,
           borderRadius: BorderRadius.circular(28),
           border: Border.all(
             color: const Color(0xFF221C17),
@@ -645,7 +671,7 @@ class _FatalErrorContent extends StatelessWidget {
                 const SizedBox(height: 18),
                 DecoratedBox(
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF9F3E8),
+                    color: _paper,
                     borderRadius: BorderRadius.circular(18),
                     border: Border.all(color: const Color(0xFFD8C3AA)),
                   ),
@@ -754,6 +780,11 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
   List<PlayerRecord> _mutualSeeAgainPlayers = const <PlayerRecord>[];
   bool _previewErrorMode = false;
   String? _lastBodyLogKey;
+  late final _PreviewStoryPromptCatalogService
+      _previewStoryPromptCatalogService =
+      const _PreviewStoryPromptCatalogService();
+  late final _PreviewStoryRtdbService _previewStoryRtdbService =
+      _PreviewStoryRtdbService();
 
   static const _previewPromptSet = [
     PromptItem(
@@ -1182,6 +1213,36 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
     setState(() {
       _screenState = ScreenState.preview;
       _previewErrorMode = true;
+      _error = null;
+    });
+  }
+
+  void _showPreviewStorySelection() {
+    if (_launchIntent.type != LaunchIntentType.preview) return;
+
+    _previewStoryRtdbService.reset();
+    setState(() {
+      _sessionId ??= 'AB12';
+      _player ??= _buildPreviewPlayer();
+      _playerId = _player!.id;
+      _previewErrorMode = false;
+      _screenState = ScreenState.preview;
+      _stage = Stage.game;
+      _session = SessionRecord(status: 'started', round: 1);
+      _player!
+        ..pairedWith = 'preview-partner'
+        ..pairedRound = 1
+        ..interactionRound = _initialInteractionRound
+        ..continueVoteRound = null
+        ..activeTurnPlayerId = null
+        ..skipNextTurn = false
+        ..currentPromptRound = 1
+        ..currentPromptIndex = _previewPromptSet.length
+        ..currentRoundPrompts = [
+          ..._previewPromptSet.map((item) => item.id),
+          storyModePromptId,
+        ]
+        ..askedPromptIds = _previewPromptSet.map((item) => item.id).toList();
       _error = null;
     });
   }
@@ -2750,6 +2811,48 @@ class _PreviewStageButton extends StatelessWidget {
   }
 }
 
+class _PreviewStoryPromptCatalogService implements StoryPromptCatalogService {
+  const _PreviewStoryPromptCatalogService();
+
+  @override
+  Future<StoryPromptDeck> loadStoryDeck() async => _previewStoryDeck;
+}
+
+class _PreviewStoryRtdbService extends RtdbService {
+  final Map<String, Map<String, StoryPairPlayerRecord>> _storyPairPlayers =
+      <String, Map<String, StoryPairPlayerRecord>>{};
+
+  void reset() {
+    _storyPairPlayers.clear();
+  }
+
+  @override
+  Future<StoryPairPlayerRecord?> fetchStoryPairPlayer({
+    required String pairId,
+    required String playerId,
+  }) async {
+    final player = _storyPairPlayers[pairId]?[playerId];
+    if (player == null) return null;
+    return StoryPairPlayerRecord.fromJson(player.toJson());
+  }
+
+  @override
+  Future<StoryPairResultRecord?> fetchStoryPairResult(String pairId) async {
+    return null;
+  }
+
+  @override
+  Future<void> saveStoryPairPlayer({
+    required String pairId,
+    required StoryPairPlayerRecord player,
+  }) async {
+    _storyPairPlayers.putIfAbsent(
+      pairId,
+      () => <String, StoryPairPlayerRecord>{},
+    )[player.playerId] = StoryPairPlayerRecord.fromJson(player.toJson());
+  }
+}
+
 class JoinWithCodeView extends StatefulWidget {
   const JoinWithCodeView({
     super.key,
@@ -3939,7 +4042,7 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
             ),
             child: DecoratedBox(
               decoration: BoxDecoration(
-                color: const Color(0xFFF9F5ED),
+                color: _offWhite,
                 borderRadius: BorderRadius.circular(24),
                 border: Border.all(color: _panelStroke),
               ),
@@ -4132,7 +4235,7 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
             ),
             child: DecoratedBox(
               decoration: BoxDecoration(
-                color: const Color(0xFFF9F5ED),
+                color: _offWhite,
                 borderRadius: BorderRadius.circular(24),
                 border: Border.all(color: _panelStroke),
               ),
@@ -4725,7 +4828,7 @@ class EndedView extends StatelessWidget {
             const SizedBox(height: 12),
             ...players.map(
               (player) => Card(
-                color: const Color(0xFFF9F5ED),
+                color: _offWhite,
                 elevation: 0,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(18),
@@ -4854,7 +4957,7 @@ class _PaperCard extends StatelessWidget {
           aspectRatio: width / height,
           child: Container(
             decoration: BoxDecoration(
-              color: const Color(0xFFF5F5F3),
+              color: _offWhite,
               borderRadius: BorderRadius.circular(9),
               boxShadow: const [
                 BoxShadow(
@@ -4954,7 +5057,7 @@ class _QuotePromptCard extends StatelessWidget {
           aspectRatio: width / height,
           child: Container(
             decoration: BoxDecoration(
-              color: const Color(0xFFF5F5F3),
+              color: _offWhite,
               borderRadius: BorderRadius.circular(9),
               boxShadow: const [
                 BoxShadow(
