@@ -77,36 +77,6 @@ Color _toneColorForSeed(String seed) {
   return HSLColor.fromAHSL(1, rng.nextDouble() * 360, 0.46, 0.52).toColor();
 }
 
-class _PreviewStoryRtdbService extends RtdbService {
-  final Map<String, Map<String, StoryPairPlayerRecord>> _players =
-      <String, Map<String, StoryPairPlayerRecord>>{};
-  final Map<String, StoryPairResultRecord> _results =
-      <String, StoryPairResultRecord>{};
-
-  @override
-  Future<StoryPairPlayerRecord?> fetchStoryPairPlayer({
-    required String pairId,
-    required String playerId,
-  }) async {
-    return _players[pairId]?[playerId];
-  }
-
-  @override
-  Future<StoryPairResultRecord?> fetchStoryPairResult(String pairId) async {
-    return _results[pairId];
-  }
-
-  @override
-  Future<void> saveStoryPairPlayer({
-    required String pairId,
-    required StoryPairPlayerRecord player,
-  }) async {
-    _players.putIfAbsent(
-            pairId, () => <String, StoryPairPlayerRecord>{})[player.playerId] =
-        player;
-  }
-}
-
 int? _targetTextureDecodeWidth({
   required BoxConstraints constraints,
   required double devicePixelRatio,
@@ -765,7 +735,7 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
   late final Uri _initialUri;
   late final LaunchIntent _launchIntent;
   late final StoryPromptCatalogService _databaseStoryPromptCatalogService;
-  late final RtdbService _previewStoryRtdbService;
+  late final _PreviewStoryRtdbService _previewStoryRtdbService;
 
   Stage _stage = Stage.signup;
   ScreenState _screenState = ScreenState.booting;
@@ -783,8 +753,6 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
   late final _PreviewStoryPromptCatalogService
       _previewStoryPromptCatalogService =
       const _PreviewStoryPromptCatalogService();
-  late final _PreviewStoryRtdbService _previewStoryRtdbService =
-      _PreviewStoryRtdbService();
 
   static const _previewPromptSet = [
     PromptItem(
