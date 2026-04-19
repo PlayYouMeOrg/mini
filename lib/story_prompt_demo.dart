@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 
 import 'session_domain.dart';
 
-const _demoBackground = Color(0xFFF2E9DD);
 const _demoPanel = Color(0xFFF8F2E8);
 const _demoCard = Color(0xFFFFFCF6);
 const _demoBorder = Color(0xFFD4C2A9);
@@ -20,6 +19,8 @@ const _storyTextureAssets = <String>[
   'assets/Polaroid3.png',
   'assets/Polaroid4.png',
 ];
+const _storyPromptCardWidth = 248.0;
+const _storyPromptCardHeight = 322.0;
 const _storyPromptPath = 'mini/prompts';
 const _storyMetadataKeys = <String>{
   'prompt',
@@ -1093,12 +1094,6 @@ class StoryPairSessionPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        foregroundColor: _demoInk,
-        title: const Text('Story Cards'),
-      ),
       body: DecoratedBox(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
@@ -1126,10 +1121,6 @@ class StoryPairSessionPage extends StatelessWidget {
                   promptCatalogService: promptCatalogService,
                   cardDealer: cardDealer,
                   rtdbService: rtdbService,
-                  showMetadataPanel: true,
-                  showPairId: true,
-                  showNameField: true,
-                  promptCardSubtitle: 'Story mode',
                   onStoryComplete: onStoryComplete,
                 ),
               ),
@@ -1326,47 +1317,61 @@ class _StoryPairPromptPanelState extends State<StoryPairPromptPanel> {
     required int choiceIndex,
     required String option,
   }) {
-    if (_hasSubmittedSelections) return;
+    if (_hasSubmittedSelections || _submitting) return;
 
     final card = _card;
     if (card == null) return;
 
+    final updatedCard = card.updateSelection(
+      choiceIndex: choiceIndex,
+      selectedOption: option,
+    );
+
     setState(() {
-      _card = card.updateSelection(
-        choiceIndex: choiceIndex,
-        selectedOption: option,
-      );
+      _card = updatedCard;
       _error = null;
       if (_result?.isComplete != true) {
         _result = null;
       }
     });
+
+    if (updatedCard.isComplete) {
+      unawaited(_submitSelections(card: updatedCard));
+    }
   }
 
-  Future<void> _submitSelections() async {
-    final card = _card;
-    if (card == null || !card.isComplete) return;
+  int _visibleChoiceIndexFor(StoryPromptCardData card) {
+    final nextIncomplete = card.choices.indexWhere(
+      (choice) => (choice.selectedOption ?? '').trim().isEmpty,
+    );
+    if (nextIncomplete >= 0) return nextIncomplete;
+    return max(0, card.choices.length - 1);
+  }
+
+  Future<void> _submitSelections({StoryPromptCardData? card}) async {
+    final resolvedCard = card ?? _card;
+    if (_submitting || resolvedCard == null || !resolvedCard.isComplete) {
+      return;
+    }
 
     setState(() {
+      _card = resolvedCard;
+      _hasSubmittedSelections = true;
       _submitting = true;
       _error = null;
     });
 
     try {
       await _savePlayerCard(
-        card,
+        resolvedCard,
         completedAt: DateTime.now().millisecondsSinceEpoch,
       );
-
       if (!mounted) return;
-      setState(() {
-        _hasSubmittedSelections = true;
-      });
-
       _startPolling();
     } catch (error) {
       if (!mounted) return;
       setState(() {
+        _hasSubmittedSelections = false;
         _error = error.toString();
       });
     } finally {
@@ -1418,6 +1423,7 @@ class _StoryPairPromptPanelState extends State<StoryPairPromptPanel> {
     final shouldShowPromptCard = !_hasSubmittedSelections && card != null;
     final shouldShowWaitingState =
         _hasSubmittedSelections && !_hasTerminalResult(result);
+    final visibleChoiceIndex = card == null ? 0 : _visibleChoiceIndexFor(card);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1474,31 +1480,17 @@ class _StoryPairPromptPanelState extends State<StoryPairPromptPanel> {
             title: _playerName,
             subtitle: widget.promptCardSubtitle,
             card: card,
-            enabled: !_hasSubmittedSelections,
+            enabled: !_hasSubmittedSelections && !_submitting,
+            showTitle: false,
+            showSubtitle: false,
+            showPromptCopy: false,
+            showInstruction: false,
+            visibleChoiceIndex: visibleChoiceIndex,
             onSelect: (choiceIndex, option) => _selectAnswer(
               choiceIndex: choiceIndex,
               option: option,
             ),
           ),
-        if (shouldShowPromptCard) ...[
-          const SizedBox(height: 16),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: FilledButton(
-              onPressed:
-                  _hasSubmittedSelections || _submitting || !card.isComplete
-                      ? null
-                      : _submitSelections,
-              child: Text(
-                _submitting
-                    ? 'Submitting...'
-                    : _hasSubmittedSelections
-                        ? 'Submitted'
-                        : 'Submit your 3 answers',
-              ),
-            ),
-          ),
-        ],
         if (shouldShowWaitingState) ...[
           const SizedBox(height: 14),
           _DemoPanel(
@@ -1521,11 +1513,13 @@ class _StoryPairPromptPanelState extends State<StoryPairPromptPanel> {
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  result?.isProcessing == true
-                      ? 'Your story is being generated now.'
-                      : result?.isComplete == true
-                          ? 'Your story is almost ready. Waiting for the story value to appear on the pair record.'
-                          : 'Your answers are saved. Waiting for the other player and for story to appear on the pair record.',
+                  _submitting
+                      ? 'Saving your answers and opening the waiting step.'
+                      : result?.isProcessing == true
+                          ? 'Your story is being generated now.'
+                          : result?.isComplete == true
+                              ? 'Your story is almost ready.'
+                              : 'Your answers are saved. Waiting for the other player.',
                   textAlign: TextAlign.center,
                   style: theme.textTheme.bodyLarge?.copyWith(
                     color: _demoInk,
@@ -1709,6 +1703,11 @@ class StoryPlayerPromptCard extends StatelessWidget {
     required this.card,
     required this.onSelect,
     this.enabled = true,
+    this.showTitle = true,
+    this.showSubtitle = true,
+    this.showPromptCopy = true,
+    this.showInstruction = true,
+    this.visibleChoiceIndex,
   });
 
   final String title;
@@ -1716,11 +1715,25 @@ class StoryPlayerPromptCard extends StatelessWidget {
   final StoryPromptCardData card;
   final void Function(int choiceIndex, String option) onSelect;
   final bool enabled;
+  final bool showTitle;
+  final bool showSubtitle;
+  final bool showPromptCopy;
+  final bool showInstruction;
+  final int? visibleChoiceIndex;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final promptCopy = (card.playerPrompt ?? '').trim();
+    final hasHeader = (showSubtitle && subtitle.trim().isNotEmpty) ||
+        (showTitle && title.trim().isNotEmpty) ||
+        (showPromptCopy && promptCopy.isNotEmpty) ||
+        showInstruction;
+    final visibleChoiceEntries = <MapEntry<int, StoryPromptChoice>>[
+      for (var index = 0; index < card.choices.length; index += 1)
+        if (visibleChoiceIndex == null || index == visibleChoiceIndex)
+          MapEntry(index, card.choices[index]),
+    ];
     return DecoratedBox(
       decoration: BoxDecoration(
         color: _demoCard,
@@ -1739,22 +1752,28 @@ class StoryPlayerPromptCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              subtitle,
-              style: theme.textTheme.labelLarge?.copyWith(
-                color: _demoAccent,
-                fontWeight: FontWeight.w800,
+            if (showSubtitle && subtitle.trim().isNotEmpty)
+              Text(
+                subtitle,
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: _demoAccent,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              title,
-              style: theme.textTheme.headlineSmall?.copyWith(
-                color: _demoInk,
-                fontWeight: FontWeight.w800,
+            if (showSubtitle &&
+                subtitle.trim().isNotEmpty &&
+                showTitle &&
+                title.trim().isNotEmpty)
+              const SizedBox(height: 6),
+            if (showTitle && title.trim().isNotEmpty)
+              Text(
+                title,
+                style: theme.textTheme.headlineSmall?.copyWith(
+                  color: _demoInk,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
-            ),
-            if (promptCopy.isNotEmpty) ...[
+            if (showPromptCopy && promptCopy.isNotEmpty) ...[
               const SizedBox(height: 12),
               Text(
                 promptCopy,
@@ -1765,31 +1784,51 @@ class StoryPlayerPromptCard extends StatelessWidget {
                 ),
               ),
             ],
-            const SizedBox(height: 16),
-            Text(
-              'Choose 1 item from each category card.',
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: _demoMutedInk,
-                fontWeight: FontWeight.w600,
+            if (showInstruction) ...[
+              const SizedBox(height: 16),
+              Text(
+                'Choose 1 item from each category card.',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: _demoMutedInk,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
-            ),
-            const SizedBox(height: 16),
+            ],
+            if (hasHeader) const SizedBox(height: 16),
             LayoutBuilder(
               builder: (context, constraints) {
                 final cardWidth = _categoryCardWidthFor(constraints.maxWidth);
+                if (visibleChoiceIndex != null &&
+                    visibleChoiceEntries.isNotEmpty) {
+                  final entry = visibleChoiceEntries.single;
+                  return Center(
+                    child: SizedBox(
+                      width: min(cardWidth, _storyPromptCardWidth),
+                      child: _PromptChoiceSection(
+                        choice: entry.value,
+                        enabled: enabled,
+                        seed:
+                            '${card.playerIndex}-${entry.value.category}-${entry.key}',
+                        rotationAngle: 0,
+                        onSelect: (option) => onSelect(entry.key, option),
+                      ),
+                    ),
+                  );
+                }
+
                 return Wrap(
                   spacing: 14,
                   runSpacing: 14,
                   children: [
-                    for (var index = 0; index < card.choices.length; index += 1)
+                    for (final entry in visibleChoiceEntries)
                       SizedBox(
                         width: cardWidth,
                         child: _PromptChoiceSection(
-                          choice: card.choices[index],
+                          choice: entry.value,
                           enabled: enabled,
                           seed:
-                              '${card.playerIndex}-${card.choices[index].category}-$index',
-                          onSelect: (option) => onSelect(index, option),
+                              '${card.playerIndex}-${entry.value.category}-${entry.key}',
+                          onSelect: (option) => onSelect(entry.key, option),
                         ),
                       ),
                   ],
@@ -1819,39 +1858,42 @@ class _PromptChoiceSection extends StatelessWidget {
     required this.onSelect,
     required this.seed,
     this.enabled = true,
+    this.rotationAngle,
   });
 
   final StoryPromptChoice choice;
   final ValueChanged<String> onSelect;
   final String seed;
   final bool enabled;
+  final double? rotationAngle;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final resolvedAngle = rotationAngle ?? _storyCardRotationForSeed(seed);
     return Transform.rotate(
-      angle: _storyCardRotationForSeed(seed),
+      angle: resolvedAngle,
       child: DecoratedBox(
         decoration: BoxDecoration(
-          color: const Color(0xFFF5F5F3),
-          borderRadius: BorderRadius.circular(14),
+          color: _demoCard,
+          borderRadius: BorderRadius.circular(9),
           boxShadow: const [
             BoxShadow(
-              color: Color(0x1E000000),
-              blurRadius: 20,
-              offset: Offset(0, 12),
+              color: Color(0x33000000),
+              blurRadius: 18,
+              offset: Offset(0, 10),
             ),
           ],
         ),
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 14),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               ClipRRect(
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(4),
                 child: AspectRatio(
-                  aspectRatio: 0.82,
+                  aspectRatio: _storyPromptCardWidth / _storyPromptCardHeight,
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
@@ -1878,31 +1920,10 @@ class _PromptChoiceSection extends StatelessWidget {
                         ),
                       ),
                       Padding(
-                        padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+                        padding: const EdgeInsets.fromLTRB(16, 18, 16, 16),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 5,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.18),
-                                borderRadius: BorderRadius.circular(999),
-                                border: Border.all(
-                                  color: Colors.white.withValues(alpha: 0.34),
-                                ),
-                              ),
-                              child: Text(
-                                'Category',
-                                style: theme.textTheme.labelMedium?.copyWith(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 12),
                             Text(
                               choice.category,
                               maxLines: 2,
@@ -1910,7 +1931,7 @@ class _PromptChoiceSection extends StatelessWidget {
                               style: theme.textTheme.titleLarge?.copyWith(
                                 color: Colors.white,
                                 fontWeight: FontWeight.w800,
-                                height: 1.0,
+                                height: 1.05,
                                 shadows: const [
                                   Shadow(
                                     color: Color(0x8A000000),
@@ -1928,7 +1949,7 @@ class _PromptChoiceSection extends StatelessWidget {
                                   child: DecoratedBox(
                                     decoration: BoxDecoration(
                                       color: Colors.black.withValues(
-                                        alpha: 0.28,
+                                        alpha: 0.3,
                                       ),
                                       borderRadius: BorderRadius.circular(16),
                                       border: Border.all(

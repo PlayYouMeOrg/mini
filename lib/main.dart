@@ -49,24 +49,6 @@ const _chatGptTextureAssets = [
   'assets/Polaroid4.png',
 ];
 
-const _previewStoryDeck = StoryPromptDeck(
-  playerPrompt: 'Choose one option from each card.',
-  categories: <StoryPromptType>[
-    StoryPromptType(
-      category: 'Action',
-      options: ['kiss', 'tease', 'chase', 'hide'],
-    ),
-    StoryPromptType(
-      category: 'Animal',
-      options: ['fox', 'owl', 'wolf', 'cat'],
-    ),
-    StoryPromptType(
-      category: 'Clothing',
-      options: ['leather', 'silk', 'denim', 'linen'],
-    ),
-  ],
-);
-
 String _textureAssetForSeed(String seed) {
   final rng = Random(seed.hashCode & 0x7fffffff);
   return _chatGptTextureAssets[rng.nextInt(_chatGptTextureAssets.length)];
@@ -750,9 +732,6 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
   List<PlayerRecord> _mutualSeeAgainPlayers = const <PlayerRecord>[];
   bool _previewErrorMode = false;
   String? _lastBodyLogKey;
-  late final _PreviewStoryPromptCatalogService
-      _previewStoryPromptCatalogService =
-      const _PreviewStoryPromptCatalogService();
 
   static const _previewPromptSet = [
     PromptItem(
@@ -1181,36 +1160,6 @@ class _SessionFlowPageState extends State<SessionFlowPage> {
     setState(() {
       _screenState = ScreenState.preview;
       _previewErrorMode = true;
-      _error = null;
-    });
-  }
-
-  void _showPreviewStorySelection() {
-    if (_launchIntent.type != LaunchIntentType.preview) return;
-
-    _previewStoryRtdbService.reset();
-    setState(() {
-      _sessionId ??= 'AB12';
-      _player ??= _buildPreviewPlayer();
-      _playerId = _player!.id;
-      _previewErrorMode = false;
-      _screenState = ScreenState.preview;
-      _stage = Stage.game;
-      _session = SessionRecord(status: 'started', round: 1);
-      _player!
-        ..pairedWith = 'preview-partner'
-        ..pairedRound = 1
-        ..interactionRound = _initialInteractionRound
-        ..continueVoteRound = null
-        ..activeTurnPlayerId = null
-        ..skipNextTurn = false
-        ..currentPromptRound = 1
-        ..currentPromptIndex = _previewPromptSet.length
-        ..currentRoundPrompts = [
-          ..._previewPromptSet.map((item) => item.id),
-          storyModePromptId,
-        ]
-        ..askedPromptIds = _previewPromptSet.map((item) => item.id).toList();
       _error = null;
     });
   }
@@ -2779,13 +2728,6 @@ class _PreviewStageButton extends StatelessWidget {
   }
 }
 
-class _PreviewStoryPromptCatalogService implements StoryPromptCatalogService {
-  const _PreviewStoryPromptCatalogService();
-
-  @override
-  Future<StoryPromptDeck> loadStoryDeck() async => _previewStoryDeck;
-}
-
 class _PreviewStoryRtdbService extends RtdbService {
   final Map<String, Map<String, StoryPairPlayerRecord>> _storyPairPlayers =
       <String, Map<String, StoryPairPlayerRecord>>{};
@@ -3625,6 +3567,18 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
   final _codeCtrl = TextEditingController();
   final Set<String> _readyStoryPairIds = <String>{};
   final Set<String> _dismissedStoryPairIds = <String>{};
+  static const List<
+      ({
+        double dx,
+        double dy,
+        double rotation,
+        double opacity,
+      })> _promptStackTransforms = [
+    (dx: -18, dy: 18, rotation: -0.13, opacity: 0.74),
+    (dx: 13, dy: 13, rotation: 0.1, opacity: 0.82),
+    (dx: -8, dy: 9, rotation: -0.06, opacity: 0.9),
+    (dx: 5, dy: 5, rotation: 0.04, opacity: 0.96),
+  ];
   bool _submitting = false;
   bool _interactionEnded = false;
   int? _seenRound;
@@ -3642,6 +3596,92 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
   late final Animation<double> _dropXOffset;
   late final Animation<double> _dropRotation;
   late final Animation<double> _dropScale;
+
+  Widget _buildPromptStackScene({
+    required List<PromptItem> prompts,
+    required PlayerRecord? player,
+    required Widget topCard,
+    required bool animateTopCard,
+  }) {
+    final completedCardCount =
+        min(max(player?.currentPromptIndex ?? 0, 0), prompts.length);
+
+    Widget buildCompletedStackCard(int stackIndex) {
+      final transform = _promptStackTransforms[
+          min(stackIndex, _promptStackTransforms.length - 1)];
+      final promptId = prompts[stackIndex].id;
+      return Center(
+        child: Transform(
+          alignment: Alignment.center,
+          transform: Matrix4.identity()
+            ..translateByDouble(transform.dx, transform.dy, 0, 1)
+            ..rotateZ(transform.rotation),
+          child: Opacity(
+            opacity: transform.opacity,
+            child: KeyedSubtree(
+              key: ValueKey('prompt-stack-card-$stackIndex'),
+              child: _PaperCard(
+                width: _gamePromptCardWidth,
+                height: _gamePromptCardHeight,
+                prompt: '',
+                seed:
+                    '$promptId-stack-$stackIndex-${player?.id ?? 'prompt-stack'}',
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    Widget buildTopCard() {
+      if (!animateTopCard) {
+        return Center(child: topCard);
+      }
+
+      return AnimatedBuilder(
+        animation: _dropController,
+        child: topCard,
+        builder: (context, child) {
+          return Center(
+            child: Transform(
+              alignment: Alignment.center,
+              transform: Matrix4.identity()
+                ..setEntry(3, 2, 0.001)
+                ..translateByDouble(
+                  _dropXOffset.value,
+                  _dropYOffset.value,
+                  0,
+                  1,
+                )
+                ..rotateZ(_dropRotation.value)
+                ..scaleByDouble(
+                  _dropScale.value,
+                  _dropScale.value,
+                  1,
+                  1,
+                ),
+              child: child,
+            ),
+          );
+        },
+      );
+    }
+
+    return Center(
+      child: SizedBox(
+        width: _gamePromptCanvasWidth,
+        height: _gamePromptCanvasHeight,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            for (var index = 0; index < completedCardCount; index += 1)
+              buildCompletedStackCard(index),
+            if (_hasStartedPromptDrop) buildTopCard(),
+          ],
+        ),
+      ),
+    );
+  }
 
   String? _storyPairIdFor(PlayerRecord? player, int? sessionRound) {
     if (widget.sessionId == null ||
@@ -3802,16 +3842,13 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
       _hasStartedPromptDrop = false;
       _interactionEnded = false;
       _restartNextCardCooldown();
-      if (isPairedThisRound &&
-          prompts.isNotEmpty &&
-          (isPlayerTurn || isSharedStoryStage)) {
+      if (isPairedThisRound && prompts.isNotEmpty) {
         _playCardDropAnimation();
       }
     }
 
     final promptIndex = player?.currentPromptIndex ?? 0;
-    if (promptIndex != _animatedPromptIndex &&
-        (isPlayerTurn || isSharedStoryStage)) {
+    if (promptIndex != _animatedPromptIndex && isPairedThisRound) {
       _animatedPromptIndex = promptIndex;
       _interactionEnded = false;
       _playCardDropAnimation();
@@ -3823,7 +3860,8 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
         (!wasPairedThisRound ||
             !hadPrompts ||
             (!wasPlayerTurn && isPlayerTurn) ||
-            (!wasSharedStoryStage && isSharedStoryStage))) {
+            (!wasSharedStoryStage && isSharedStoryStage) ||
+            (wasPlayerTurn != isPlayerTurn))) {
       _interactionEnded = false;
       _playCardDropAnimation();
       _restartNextCardCooldown();
@@ -4317,20 +4355,22 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
     final prompts = widget.promptCatalog
             ?.resolveIds(player?.currentRoundPrompts ?? const <String>[]) ??
         const <PromptItem>[];
-    final isPlayerTurn =
-        isPairedThisRound && player != null && _isPlayerTurn(player);
+    final pairedPlayer = isPairedThisRound ? player : null;
+    final isPlayerTurn = pairedPlayer != null && _isPlayerTurn(pairedPlayer);
     final isWaitingForPartnerTurn =
-        isPairedThisRound && player != null && _isWaitingForPartnerTurn(player);
+        pairedPlayer != null && _isWaitingForPartnerTurn(pairedPlayer);
     final isSharedStoryStage =
-        isPairedThisRound && player != null && _isSharedStoryStage(player);
-    final isInteractionReadyToFinish = isPairedThisRound &&
-        player != null &&
-        _isInteractionReadyToFinish(player);
+        pairedPlayer != null && _isSharedStoryStage(pairedPlayer);
+    final isInteractionReadyToFinish =
+        pairedPlayer != null && _isInteractionReadyToFinish(pairedPlayer);
     final promptIndex = prompts.isEmpty
         ? 0
         : isSharedStoryStage
             ? prompts.length - 1
-            : (player?.currentPromptIndex ?? 0).clamp(0, prompts.length - 1);
+            : (pairedPlayer?.currentPromptIndex ?? 0).clamp(
+                0,
+                prompts.length - 1,
+              );
     final interactionRound =
         player?.interactionRound ?? _initialInteractionRound;
     final isFinalInteractionRound = interactionRound >= _finalInteractionRound;
@@ -4384,28 +4424,15 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
             width: _gamePromptCardWidth,
             height: _gamePromptCardHeight,
             prompt: prompts[promptIndex].text,
-            seed: '${prompts[promptIndex].id}-$promptIndex-${player?.id ?? ''}',
+            seed: '${prompts[promptIndex].id}-$promptIndex-${pairedPlayer.id}',
           );
-    final showPromptCards = _hasStartedPromptDrop && activePromptCard != null;
-    final showEmbeddedStoryPanel = isSharedStoryStage &&
-        widget.sessionId != null &&
-        player != null &&
-        player.pairedWith != null;
+    final showEmbeddedStoryPanel =
+        isSharedStoryStage && widget.sessionId != null;
     final storyPairId = _storyPairIdFor(player, currentRound);
     final hasReadyStory =
         storyPairId != null && _readyStoryPairIds.contains(storyPairId);
     final isOpeningStoryPage =
         storyPairId != null && _activeStoryRoutePairId == storyPairId;
-    _PaperCard? buildStackCard(String seedSuffix) {
-      if (prompts.isEmpty) return null;
-      return _PaperCard(
-        width: _gamePromptCardWidth,
-        height: _gamePromptCardHeight,
-        prompt: prompts[promptIndex].text,
-        seed:
-            '${prompts[promptIndex].id}-$promptIndex-${player?.id ?? ''}-$seedSuffix',
-      );
-    }
 
     return DefaultTextStyle.merge(
       style: backgroundBodyStyle,
@@ -4485,71 +4512,13 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
                     ),
                   ],
                 ] else if (isPlayerTurn) ...[
-                  Center(
-                    child: SizedBox(
-                      width: _gamePromptCanvasWidth,
-                      height: _gamePromptCanvasHeight,
-                      child: Stack(
-                        clipBehavior: Clip.none,
-                        children: [
-                          if (showPromptCards)
-                            Center(
-                              child: Transform(
-                                alignment: Alignment.center,
-                                transform: Matrix4.identity()
-                                  ..translateByDouble(-14, 8, 0, 1)
-                                  ..rotateZ(-0.11),
-                                child: Opacity(
-                                  opacity: 0.9,
-                                  child: buildStackCard('back-left'),
-                                ),
-                              ),
-                            ),
-                          if (showPromptCards)
-                            Center(
-                              child: Transform(
-                                alignment: Alignment.center,
-                                transform: Matrix4.identity()
-                                  ..translateByDouble(10, 12, 0, 1)
-                                  ..rotateZ(0.09),
-                                child: Opacity(
-                                  opacity: 0.86,
-                                  child: buildStackCard('back-right'),
-                                ),
-                              ),
-                            ),
-                          if (showPromptCards)
-                            AnimatedBuilder(
-                              animation: _dropController,
-                              child: activePromptCard,
-                              builder: (context, child) {
-                                return Center(
-                                  child: Transform(
-                                    alignment: Alignment.center,
-                                    transform: Matrix4.identity()
-                                      ..setEntry(3, 2, 0.001)
-                                      ..translateByDouble(
-                                        _dropXOffset.value,
-                                        _dropYOffset.value,
-                                        0,
-                                        1,
-                                      )
-                                      ..rotateZ(_dropRotation.value)
-                                      ..scaleByDouble(
-                                        _dropScale.value,
-                                        _dropScale.value,
-                                        1,
-                                        1,
-                                      ),
-                                    child: child,
-                                  ),
-                                );
-                              },
-                            ),
-                        ],
-                      ),
+                  if (activePromptCard != null)
+                    _buildPromptStackScene(
+                      prompts: prompts,
+                      player: player,
+                      topCard: activePromptCard,
+                      animateTopCard: true,
                     ),
-                  ),
                   const SizedBox(height: 10),
                   if (!_interactionEnded)
                     _BlurMixButton(
@@ -4580,8 +4549,10 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
                               : 'Pass turn',
                     ),
                 ] else if (isWaitingForPartnerTurn) ...[
-                  Center(
-                    child: _PaperCard(
+                  _buildPromptStackScene(
+                    prompts: prompts,
+                    player: player,
+                    topCard: _PaperCard(
                       width: _gamePromptCardWidth,
                       height: _gamePromptCardHeight,
                       prompt: player.skipNextTurn
@@ -4589,6 +4560,7 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
                           : 'It is their turn.\n\nYou can ask the same question, but your next turn will be skipped.',
                       seed: 'waiting-${player.id}-${player.currentPromptIndex}',
                     ),
+                    animateTopCard: false,
                   ),
                   const SizedBox(height: 10),
                   _BlurMixButton(
@@ -4625,14 +4597,17 @@ class _GameViewState extends State<GameView> with TickerProviderStateMixin {
                     style: backgroundBodyStyle,
                   ),
                 ] else if (isInteractionReadyToFinish) ...[
-                  Center(
-                    child: _PaperCard(
+                  _buildPromptStackScene(
+                    prompts: prompts,
+                    player: player,
+                    topCard: _PaperCard(
                       width: _gamePromptCardWidth,
                       height: _gamePromptCardHeight,
                       prompt:
                           'All cards are done.\n\nWrap up the conversation when you are ready.',
-                      seed: 'finish-${player!.id}-${player.currentPromptIndex}',
+                      seed: 'finish-${player.id}-${player.currentPromptIndex}',
                     ),
+                    animateTopCard: false,
                   ),
                   const SizedBox(height: 10),
                   if (!_interactionEnded) ...[
