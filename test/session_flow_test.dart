@@ -128,10 +128,13 @@ void main() {
       await _dismissGotItIfVisible(tester);
       await tester.pump(const Duration(milliseconds: 300));
 
-      expect(find.text('Story Cards'), findsOneWidget);
-      expect(find.text('Story mode'), findsOneWidget);
+      expect(find.text('Story Cards'), findsNothing);
+      expect(find.text('Story mode'), findsNothing);
+      expect(_visibleStoryCategoryCount(), 1);
       expect(
-          find.byIcon(Icons.radio_button_unchecked_rounded), findsNWidgets(9));
+        find.byIcon(Icons.radio_button_unchecked_rounded),
+        findsNWidgets(3),
+      );
     });
 
     testWidgets('shows error screen when explicit session boot fails', (
@@ -407,6 +410,48 @@ void main() {
       expect(promptText.style?.fontSize, lessThan(28));
     });
 
+    testWidgets('starts prompt stacking from zero completed cards', (
+      tester,
+    ) async {
+      final promptCatalog =
+          await FakePromptCatalogService().loadDatingCatalog();
+      final player = _buildPairedPlayer(
+        id: 'player-1',
+        name: 'Preview User',
+        partnerId: 'player-2',
+        currentPromptIndex: 0,
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: GameView(
+              sessionId: 'test-session',
+              player: player,
+              session: SessionRecord(status: 'started', round: 1),
+              onSubmitCode: (_) async {},
+              onDrawPrompt: ({
+                required int promptIndex,
+                required String partnerId,
+              }) async {},
+              onAskSameQuestion: () async {},
+              onContinueInteraction: () async {},
+              promptCatalog: promptCatalog,
+              unpairedInstructions:
+                  'Enter any 4-character code to connect instantly.',
+              codeEntryPrompt: 'Enter any 4-character code to start:',
+            ),
+          ),
+        ),
+      );
+
+      await tester.pumpAndSettle();
+      await _dismissGotItIfVisible(tester);
+
+      expect(find.text('Prompt 1'), findsOneWidget);
+      expect(find.byKey(const ValueKey('prompt-stack-card-0')), findsNothing);
+    });
+
     testWidgets('round 2 completion does not offer keep going', (
       tester,
     ) async {
@@ -530,6 +575,53 @@ void main() {
         find.textContaining('your next turn will be skipped'),
         findsOneWidget,
       );
+      expect(find.byKey(const ValueKey('prompt-stack-card-0')), findsNothing);
+    });
+
+    testWidgets('keeps completed cards stacked while waiting for partner turn',
+        (
+      tester,
+    ) async {
+      final promptCatalog =
+          await FakePromptCatalogService().loadDatingCatalog();
+      final player = _buildPairedPlayer(
+        id: 'player-1',
+        name: 'Preview User',
+        partnerId: 'player-2',
+        currentPromptIndex: 2,
+        activeTurnPlayerId: 'player-2',
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: GameView(
+              sessionId: 'test-session',
+              player: player,
+              session: SessionRecord(status: 'started', round: 1),
+              onSubmitCode: (_) async {},
+              onDrawPrompt: ({
+                required int promptIndex,
+                required String partnerId,
+              }) async {},
+              onAskSameQuestion: () async {},
+              onContinueInteraction: () async {},
+              promptCatalog: promptCatalog,
+              unpairedInstructions:
+                  'Enter any 4-character code to connect instantly.',
+              codeEntryPrompt: 'Enter any 4-character code to start:',
+            ),
+          ),
+        ),
+      );
+
+      await tester.pumpAndSettle();
+      await _dismissGotItIfVisible(tester);
+
+      expect(find.text('Ask same question'), findsOneWidget);
+      expect(find.byKey(const ValueKey('prompt-stack-card-0')), findsOneWidget);
+      expect(find.byKey(const ValueKey('prompt-stack-card-1')), findsOneWidget);
+      expect(find.byKey(const ValueKey('prompt-stack-card-2')), findsNothing);
     });
 
     testWidgets('shows server-backed story options on the fourth card', (
@@ -578,16 +670,15 @@ void main() {
       await tester.pump(const Duration(seconds: 15));
       await tester.pump();
 
-      expect(find.text('Story Cards'), findsOneWidget);
-      expect(find.text('Story mode'), findsOneWidget);
-      expect(find.text('Action'), findsOneWidget);
-      expect(find.text('Animal'), findsOneWidget);
-      expect(find.text('Clothing'), findsOneWidget);
+      expect(find.text('Story Cards'), findsNothing);
+      expect(find.text('Story mode'), findsNothing);
+      expect(_visibleStoryCategoryCount(), 1);
+      expect(find.text('Category'), findsNothing);
       expect(find.text('End interaction'), findsNothing);
       expect(find.text('Finish interaction'), findsNothing);
       expect(
         find.byIcon(Icons.radio_button_unchecked_rounded),
-        findsNWidgets(9),
+        findsNWidgets(3),
       );
     });
 
@@ -640,29 +731,15 @@ void main() {
       await tester.pump(const Duration(seconds: 15));
       await tester.pump();
 
-      final firstChoice =
-          find.byIcon(Icons.radio_button_unchecked_rounded).at(0);
-      await tester.ensureVisible(firstChoice);
-      await tester.tap(firstChoice);
-      await tester.pump();
+      for (var index = 0; index < 3; index += 1) {
+        final choice = find.byIcon(Icons.radio_button_unchecked_rounded).first;
+        await tester.ensureVisible(choice);
+        await tester.tap(choice);
+        await tester.pump();
+      }
 
-      final secondChoice =
-          find.byIcon(Icons.radio_button_unchecked_rounded).at(3);
-      await tester.ensureVisible(secondChoice);
-      await tester.tap(secondChoice);
-      await tester.pump();
-
-      final thirdChoice =
-          find.byIcon(Icons.radio_button_unchecked_rounded).at(6);
-      await tester.ensureVisible(thirdChoice);
-      await tester.tap(thirdChoice);
-      await tester.pump();
-      await tester.ensureVisible(find.text('Submit your 3 answers'));
-      await tester.tap(find.text('Submit your 3 answers'));
-      await tester.pump();
       await tester.pump(const Duration(milliseconds: 200));
 
-      expect(find.text('Submit your 3 answers'), findsNothing);
       expect(find.text('Choose 1 item from each category card.'), findsNothing);
       expect(find.text('Writing your story'), findsOneWidget);
       expect(find.byType(CircularProgressIndicator), findsOneWidget);
@@ -731,7 +808,7 @@ void main() {
       await tester.pump(const Duration(seconds: 15));
       await tester.pump();
 
-      expect(find.text('Story Cards'), findsOneWidget);
+      expect(find.text('Story Cards'), findsNothing);
       expect(find.text('Generated result'), findsOneWidget);
       expect(
         find.text(
@@ -740,7 +817,7 @@ void main() {
         findsOneWidget,
       );
 
-      Navigator.of(tester.element(find.text('Story Cards'))).pop();
+      Navigator.of(tester.element(find.text('Generated result'))).pop();
       await tester.pumpAndSettle();
 
       expect(find.text('End interaction'), findsOneWidget);
@@ -780,6 +857,15 @@ Future<void> _dismissGotItIfVisible(WidgetTester tester) async {
   await tester.tap(finder, warnIfMissed: false);
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 200));
+}
+
+int _visibleStoryCategoryCount() {
+  final categoryFinders = [
+    find.text('Action'),
+    find.text('Animal'),
+    find.text('Clothing'),
+  ];
+  return categoryFinders.where((finder) => finder.evaluate().isNotEmpty).length;
 }
 
 class FakeRtdbService extends RtdbService {
